@@ -1,0 +1,65 @@
+// قاعدة بيانات دفتر مجالس المشايخ — PostgreSQL (Neon) على Vercel
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  majalis      Majlis[]
+}
+
+/// مجلس مع شيخ
+model Majlis {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sheikh    String
+  topic     String     @default("")
+  /// YYYY-MM-DD
+  date      String     @default("")
+  place     String     @default("")
+  /// التحضير والافتتاح (نص بتنسيق بسيط)
+  opening   String     @default("")
+  /// عن الشيخ (نص بتنسيق بسيط)
+  briefing  String     @default("")
+  books     String     @default("")
+  general   String     @default("")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  questions Question[]
+
+  @@index([userId])
+}
+
+/// grp: core | ask | spare
+model Question {
+  id        String   @id @default(cuid())
+  majlisId  String
+  majlis    Majlis   @relation(fields: [majlisId], references: [id], onDelete: Cascade)
+  text      String
+  why       String   @default("")
+  grp       String   @default("core")
+  pos       Int      @default(0)
+  asked     Boolean  @default(false)
+  answer    String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([majlisId])
+}
+
+model Setting {
+  key   String @id
+  value String
+}
