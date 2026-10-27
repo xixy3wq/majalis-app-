@@ -143,7 +143,7 @@
       route();
     }, function (e) {
       if (e.status === 401) return; // showLogin already rendered
-      app.innerHTML = '<div class="wrap"><p class="boot">ما قدرت أوصل للموقع. تأكد من الاتصال وحدّث الصفحة.</p></div>';
+      app.innerHTML = '<div class="wrap"><p class="boot">' + esc(e.status === 503 ? e.message : 'ما قدرت أوصل للموقع. تأكد من الاتصال وحدّث الصفحة.') + '</p></div>';
     });
   }
 
@@ -157,26 +157,41 @@
   window.addEventListener('hashchange', route);
   function leaveSession() { if (!cur) return; flushAll(); cur = null; }
 
-  /* ================= LOGIN ================= */
+  /* ================= LOGIN / FIRST-RUN SETUP ================= */
   function showLogin() {
     if (view === 'login') return;
     leaveSession(); view = 'login'; me = null;
+    renderAuth(false);
+    fetch('/api/setup', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (view !== 'login') return;
+      if (j && j.db === false) { app.innerHTML = '<div class="wrap"><p class="boot">قاعدة البيانات غير مربوطة بعد. من Vercel: Storage ← Neon، ثم Redeploy.</p></div>'; return; }
+      if (j && j.needed) renderAuth(true);
+    }, function () {});
+  }
+  function renderAuth(setup) {
     app.innerHTML =
       '<div class="login wrap"><form class="login-card" id="loginForm" autocomplete="on">' +
       '<div class="eyebrow">دفترك مع أهل العلم</div><h1>مجالس المشايخ</h1>' +
-      '<div class="field"><label for="lg-u">اسم المستخدم</label><input class="input" id="lg-u" name="username" autocomplete="username" autocapitalize="none" required></div>' +
-      '<div class="field"><label for="lg-p">كلمة المرور</label><input class="input" id="lg-p" name="password" type="password" autocomplete="current-password" required></div>' +
+      (setup ? '<p class="lede">أول مرة تفتح الموقع. سوّ حسابك، ومجلس الشيخ مساعد الطيار بيكون جاهز فيه.</p>' +
+        '<div class="field"><label for="lg-n">اسمك</label><input class="input" id="lg-n" autocomplete="name"></div>' : '') +
+      '<div class="field"><label for="lg-u">اسم المستخدم</label><input class="input" id="lg-u" name="username" autocomplete="username" autocapitalize="none" dir="ltr" required' + (setup ? ' placeholder="حروف إنجليزية صغيرة"' : '') + '></div>' +
+      '<div class="field"><label for="lg-p">كلمة المرور</label><input class="input" id="lg-p" name="password" type="password" autocomplete="' + (setup ? 'new-password' : 'current-password') + '" dir="ltr" required' + (setup ? ' placeholder="٨ أحرف أو أكثر"' : '') + '></div>' +
       '<p class="login-err" id="lg-err" role="alert"></p>' +
-      '<button class="btn primary" type="submit">دخول</button></form></div>';
+      '<button class="btn primary" type="submit">' + (setup ? 'إنشاء الحساب' : 'دخول') + '</button></form></div>';
     document.getElementById('loginForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var btn = e.target.querySelector('button'), err = document.getElementById('lg-err');
       btn.disabled = true; err.textContent = '';
-      fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: document.getElementById('lg-u').value, password: document.getElementById('lg-p').value }) })
-        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      var body = { username: document.getElementById('lg-u').value, password: document.getElementById('lg-p').value };
+      if (setup) body.name = document.getElementById('lg-n').value;
+      fetch(setup ? '/api/setup' : '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
         .then(function (x) {
           btn.disabled = false;
-          if (!x.ok) { err.textContent = x.j.error || 'تعذّر الدخول'; return; }
+          if (!x.ok) {
+            if (setup && x.status === 409) { renderAuth(false); return; }
+            err.textContent = x.j.error || 'تعذّر الدخول'; return;
+          }
           view = null; boot();
         }, function () { btn.disabled = false; err.textContent = 'ما فيه اتصال، جرّب مرة ثانية.'; });
     });

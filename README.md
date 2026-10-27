@@ -4,25 +4,24 @@
 
 ## الرفع على الإنترنت (مرة واحدة)
 
-1. **Vercel**: Add New → Project ← اختر المستودع `majalis-app` ← Deploy (أول رفع ممكن يفشل لأن القاعدة ما انربطت، عادي).
-2. **قاعدة البيانات**: من صفحة المشروع ← Storage ← Create Database ← **Neon** ← اربطها بالمشروع. يضيف Vercel تلقائيًا `DATABASE_URL` و`DATABASE_URL_UNPOOLED`.
-3. **المتغيرات** (Settings → Environment Variables):
-   - `AUTH_SECRET` = نص عشوائي طويل (32 حرفًا أو أكثر)
-   - `SEED_ADMIN_USERNAME` = اسم المستخدم (حروف إنجليزية صغيرة)
-   - `SEED_ADMIN_PASSWORD` = كلمة المرور (8 أحرف أو أكثر)
-   - `SEED_ADMIN_NAME` = اسمك (اختياري)
-4. **Redeploy**. الجداول وحسابك ومجلس الشيخ مساعد الطيار تنشأ تلقائيًا في أول رفع ناجح.
+1. **Vercel**: Add New → Project ← اختر المستودع `majalis-app` ← Deploy.
+2. **قاعدة البيانات**: من صفحة المشروع ← Storage ← Create Database ← **Neon** ← اربطها بالمشروع.
+3. **Redeploy** (Deployments ← آخر رفع ← ⋯ ← Redeploy).
+4. افتح الموقع: أول مرة يطلب منك تسوي اسم المستخدم وكلمة المرور، ومجلس الشيخ مساعد الطيار يكون جاهز.
 
-> نسيت كلمة المرور؟ أضف `SEED_ADMIN_FORCE_PASSWORD=1` واعمل Redeploy، ثم احذف المتغير.
+متغيرات اختيارية: `AUTH_SECRET` (نص عشوائي ٣٢ حرفًا أو أكثر)، أو `SEED_ADMIN_USERNAME` و`SEED_ADMIN_PASSWORD` لإنشاء الحساب مع الرفع بدل شاشة أول مرة.
+
+> نسيت كلمة المرور؟ أضف `SEED_ADMIN_USERNAME` و`SEED_ADMIN_PASSWORD` الجديدة و`SEED_ADMIN_FORCE_PASSWORD=1` واعمل Redeploy، ثم احذف المتغير الأخير.
 
 ## هيكل المشروع
 
 ```
 prisma/schema.prisma      ← الجداول: User, Majlis, Question, Setting
-prisma/ensure-admin.mjs   ← إنشاء حسابك مع كل رفع
+prisma/db-sync.mjs        ← تجهيز الجداول مع كل رفع (يتخطى إذا القاعدة مو مربوطة)
+prisma/ensure-admin.mjs   ← إنشاء حسابك من المتغيرات (اختياري)
 prisma/seed-first.mjs     ← إضافة مجلس الشيخ مساعد الطيار مرة وحدة
 prisma/seed-masaed.json   ← بيانات ذاك المجلس
-app/api/login|logout|data|majlis|act
+app/api/setup|login|logout|data|majlis|act
 public/app.js             ← الواجهة كاملة
 app/globals.css           ← التصميم (فاتح وداكن)
 ```

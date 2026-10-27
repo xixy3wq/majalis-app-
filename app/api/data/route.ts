@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/db";
-import { handle, requireUser } from "@/lib/auth";
+import { fail, handle, requireUser } from "@/lib/auth";
 export const dynamic = "force-dynamic";
 
 // قائمة المجالس مع عدد الأسئلة وعدد اللي انسألت
 export async function GET() {
   return handle(async () => {
+    if (!process.env.DATABASE_URL) fail("قاعدة البيانات غير مربوطة بعد. من Vercel: Storage ← Neon، ثم Redeploy.", 503);
     const me = await requireUser();
     const list = await prisma.majlis.findMany({
       where: { userId: me.id },
