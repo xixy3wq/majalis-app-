@@ -133,13 +133,13 @@
   }
 
   /* ---------- state ---------- */
-  var me = null, list = [], listLoaded = false;
+  var me = null, ai = null, list = [], listLoaded = false;
   var view = null; // 'login' | 'home' | 'session'
   var cur = null;
 
   function boot() {
     api('/api/data').then(function (j) {
-      me = j.me; list = j.majalis || []; listLoaded = true; netState = 'live';
+      me = j.me; ai = j.ai || null; list = j.majalis || []; listLoaded = true; netState = 'live';
       route();
     }, function (e) {
       if (e.status === 401) return; // showLogin already rendered
@@ -152,6 +152,7 @@
     if (!me) return;
     var h = (location.hash || '').slice(1);
     if (h.indexOf('s-') === 0 && h.length > 2) openSession(h.slice(2));
+    else if (h === 'admin' && me.role === 'admin') openAdmin();
     else openHome();
   }
   window.addEventListener('hashchange', route);
@@ -161,35 +162,43 @@
   function showLogin() {
     if (view === 'login') return;
     leaveSession(); view = 'login'; me = null;
-    renderAuth(false);
+    renderAuth('login');
     fetch('/api/setup', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
       if (view !== 'login') return;
       if (j && j.db === false) { app.innerHTML = '<div class="wrap"><p class="boot">قاعدة البيانات غير مربوطة بعد. من Vercel: Storage ← Neon، ثم Redeploy.</p></div>'; return; }
-      if (j && j.needed) renderAuth(true);
+      if (j && j.needed) renderAuth('setup');
     }, function () {});
   }
-  function renderAuth(setup) {
+  // mode: login | register | setup (أول حساب في الموقع ويصير المدير)
+  function renderAuth(mode) {
+    var setup = mode === 'setup', reg = mode === 'register', newAcc = setup || reg;
     app.innerHTML =
       '<div class="login wrap"><form class="login-card" id="loginForm" autocomplete="on">' +
       '<div class="eyebrow">دفترك مع أهل العلم</div><h1>مجالس المشايخ</h1>' +
-      (setup ? '<p class="lede">أول مرة تفتح الموقع. سوّ حسابك، ومجلس الشيخ مساعد الطيار بيكون جاهز فيه.</p>' +
-        '<div class="field"><label for="lg-n">اسمك</label><input class="input" id="lg-n" autocomplete="name"></div>' : '') +
-      '<div class="field"><label for="lg-u">اسم المستخدم</label><input class="input" id="lg-u" name="username" autocomplete="username" autocapitalize="none" dir="ltr" required' + (setup ? ' placeholder="حروف إنجليزية صغيرة"' : '') + '></div>' +
-      '<div class="field"><label for="lg-p">كلمة المرور</label><input class="input" id="lg-p" name="password" type="password" autocomplete="' + (setup ? 'new-password' : 'current-password') + '" dir="ltr" required' + (setup ? ' placeholder="٨ أحرف أو أكثر"' : '') + '></div>' +
+      (setup ? '<p class="lede">أول مرة تفتح الموقع. سوّ حسابك وبيكون حساب المدير، وتلقى فيه مجالس الشيوخ الجاهزة.</p>' : '') +
+      (reg ? '<p class="lede">سوّ حسابك وابدأ تسجّل مجالسك. واستخدام الذكاء الاصطناعي يتفعّل بعد موافقة المدير.</p>' : '') +
+      (newAcc ? '<div class="field"><label for="lg-n">اسمك</label><input class="input" id="lg-n" autocomplete="name" required></div>' : '') +
+      '<div class="field"><label for="lg-u">اسم المستخدم</label><input class="input" id="lg-u" name="username" autocomplete="username" autocapitalize="none" dir="ltr" required' + (newAcc ? ' placeholder="حروف إنجليزية صغيرة"' : '') + '></div>' +
+      '<div class="field"><label for="lg-p">كلمة المرور</label><input class="input" id="lg-p" name="password" type="password" autocomplete="' + (newAcc ? 'new-password' : 'current-password') + '" dir="ltr" required' + (newAcc ? ' placeholder="٨ أحرف أو أكثر"' : '') + '></div>' +
       '<p class="login-err" id="lg-err" role="alert"></p>' +
-      '<button class="btn primary" type="submit">' + (setup ? 'إنشاء الحساب' : 'دخول') + '</button></form></div>';
+      '<button class="btn primary" type="submit">' + (newAcc ? 'إنشاء الحساب' : 'دخول') + '</button>' +
+      (setup ? '' : '<p class="auth-switch">' + (reg ? 'عندك حساب؟ <button class="linkish" type="button" id="toLogin">ادخل</button>' : 'ما عندك حساب؟ <button class="linkish" type="button" id="toReg">سجّل الحين</button>') + '</p>') +
+      '</form></div>';
+    var tl = document.getElementById('toLogin'), tr = document.getElementById('toReg');
+    if (tl) tl.addEventListener('click', function () { renderAuth('login'); });
+    if (tr) tr.addEventListener('click', function () { renderAuth('register'); });
     document.getElementById('loginForm').addEventListener('submit', function (e) {
       e.preventDefault();
-      var btn = e.target.querySelector('button'), err = document.getElementById('lg-err');
+      var btn = e.target.querySelector('button[type=submit]'), err = document.getElementById('lg-err');
       btn.disabled = true; err.textContent = '';
       var body = { username: document.getElementById('lg-u').value, password: document.getElementById('lg-p').value };
-      if (setup) body.name = document.getElementById('lg-n').value;
-      fetch(setup ? '/api/setup' : '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (newAcc) body.name = document.getElementById('lg-n').value;
+      fetch(setup ? '/api/setup' : reg ? '/api/register' : '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
         .then(function (x) {
           btn.disabled = false;
           if (!x.ok) {
-            if (setup && x.status === 409) { renderAuth(false); return; }
+            if (setup && x.status === 409) { renderAuth('login'); return; }
             err.textContent = x.j.error || 'تعذّر الدخول'; return;
           }
           view = null; boot();
@@ -204,11 +213,12 @@
     document.title = 'مجالس المشايخ';
     app.innerHTML =
       '<header class="home-top wrap"><div class="home-head"><div class="eyebrow">دفترك مع أهل العلم</div>' +
-      '<div class="who"><span>' + esc(me && me.name) + '</span><button class="linkish" id="logout" type="button">خروج</button></div></div>' +
+      '<div class="who"><span>' + esc(me && me.name) + '</span>' + (me && me.role === 'admin' ? '<a class="linkish" href="#admin">المستخدمون</a>' : '') + '<button class="linkish" id="logout" type="button">خروج</button></div></div>' +
       '<h1>دفتر مجالس المشايخ</h1>' +
       '<p class="lede">سجّل كل مجلس: التحضير، والأسئلة، وأجوبة الشيخ، والفوائد. وتقدر تضيف أسئلة وتعدّلها وأنت في الجلسة.</p></header>' +
       '<main class="home-main wrap">' +
-      '<div class="btns"><button class="btn primary" id="newBtn" type="button">جلسة جديدة</button></div>' +
+      aiPanelHtml() +
+      '<div class="btns"><button class="btn" id="newBtn" type="button">جلسة يدوية</button></div>' +
       '<form class="new-form" id="newForm" hidden autocomplete="off">' +
       '<div class="new-grid">' +
       '<div class="field"><label for="nf-sheikh">اسم الشيخ</label><input class="input" id="nf-sheikh" required placeholder="مثال: الشيخ عبدالله"></div>' +
@@ -235,6 +245,7 @@
         });
     });
     renderList();
+    wireAi();
     api('/api/data').then(function (j) { list = j.majalis || []; if (view === 'home') renderList(); }, function () {});
   }
 
@@ -257,6 +268,161 @@
         (stats ? '<span class="s-stats">' + stats + '</span>' : '') + '</a>';
     }).join('');
   }
+
+  /* ================= AI: build a session from the sheikh's name ================= */
+  var JKEY = 'majalis-ai-job';
+  function savedJob() { try { return JSON.parse(localStorage.getItem(JKEY) || 'null'); } catch (e) { return null; } }
+  function setSavedJob(v) { try { if (v) localStorage.setItem(JKEY, JSON.stringify(v)); else localStorage.removeItem(JKEY); } catch (e) {} }
+
+  function aiPanelHtml() {
+    if (!ai) return '';
+    if (!ai.ready) return ai.admin ? '<p class="banner">الذكاء الاصطناعي متوقف: أضف <span dir="ltr">ANTHROPIC_API_KEY</span> في Vercel ← Settings ← Environment Variables، ثم Redeploy.</p>' : '';
+    if (!ai.allowed) return '<p class="ai-note">تقدر تسجّل جلساتك يدويًا من الحين. والجلسات الجاهزة بالذكاء الاصطناعي تتفعّل لحسابك بعد موافقة المدير.</p>';
+    var left = ai.limit == null ? '' : '<span class="ai-left">باقي لك اليوم: ' + ar(Math.max(0, ai.limit - ai.used)) + ' من ' + ar(ai.limit) + '</span>';
+    var sj = savedJob();
+    return '<section class="ai-card" id="aiCard" aria-labelledby="ai-h">' +
+      '<div class="ai-head"><h2 id="ai-h">جهّز جلسة مع شيخ</h2>' + left + '</div>' +
+      '<p class="lede">اكتب اسم الشيخ وموضوعك، ويبحث الموقع عنه في الإنترنت ويجهّز لك الافتتاح والأسئلة وتحليل شخصيته مع المصادر.</p>' +
+      (sj ? '<p class="ai-resume">فيه جلسة ما كملت عن «' + esc(sj.sheikh) + '». <button class="linkish" type="button" id="aiResume">كمّلها</button> <button class="linkish" type="button" id="aiDrop">تجاهلها</button></p>' : '') +
+      '<form id="aiForm" autocomplete="off" class="ai-form">' +
+      '<div class="new-grid">' +
+      '<div class="field"><label for="ai-sheikh">اسم الشيخ</label><input class="input" id="ai-sheikh" required placeholder="مثال: الشيخ مساعد الطيار"></div>' +
+      '<div class="field"><label for="ai-hint">معلومة تميّزه (اختياري)</label><input class="input" id="ai-hint" placeholder="جامعته، أو كتاب له، أو مدينته"></div>' +
+      '<div class="field wide"><label for="ai-topic">موضوع الجلسة</label><input class="input" id="ai-topic" placeholder="وش تبي تركّز عليه مع الشيخ؟"></div>' +
+      '<div class="field wide"><label for="ai-about">عرّف بنفسك وطلابك (اختياري)</label><input class="input" id="ai-about" placeholder="مثال: مشرف حلقة تحفيظ، طلابي في المرحلة المتوسطة" value="' + esc(me.about || '') + '"></div>' +
+      '</div><p class="login-err" id="ai-err" role="alert"></p>' +
+      '<div class="btns"><button class="btn primary" type="submit">جهّز الجلسة</button></div></form>' +
+      '<div id="aiProgress" hidden></div></section>';
+  }
+
+  var STEPS = [
+    { op: 'research', label: 'يبحث عن الشيخ في الإنترنت', note: 'أطول خطوة، ممكن تأخذ دقيقة أو دقيقتين' },
+    { op: 'brief', label: 'يحلل شخصيته العلمية وأسلوبه' },
+    { op: 'plan', label: 'يجهّز الافتتاح والأسئلة' },
+    { op: 'save', label: 'يحفظ الجلسة في دفترك' }
+  ];
+
+  function wireAi() {
+    var form = document.getElementById('aiForm'); if (!form) return;
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var sheikh = document.getElementById('ai-sheikh').value.trim();
+      if (sheikh.length < 3) { document.getElementById('ai-err').textContent = 'اكتب اسم الشيخ'; return; }
+      var about = document.getElementById('ai-about').value.trim();
+      if (about !== (me.about || '')) { me.about = about; api('/api/me', { about: about }).catch(function () {}); }
+      runAi({ sheikh: sheikh, hint: document.getElementById('ai-hint').value.trim(), topic: document.getElementById('ai-topic').value.trim() }, null, 0);
+    });
+    var rs = document.getElementById('aiResume'), dr = document.getElementById('aiDrop');
+    if (rs) rs.addEventListener('click', function () { var sj = savedJob(); if (sj) runAi({ sheikh: sj.sheikh }, sj.id, 0); });
+    if (dr) dr.addEventListener('click', function () { setSavedJob(null); openHome(); });
+  }
+
+  function paintSteps(at, state, msg, preview) {
+    var box = document.getElementById('aiProgress'); if (!box) return;
+    box.hidden = false;
+    document.getElementById('aiForm').hidden = true;
+    var html = '<ol class="ai-steps">';
+    STEPS.forEach(function (st, i) {
+      var cls = i < at ? 'done' : i === at ? state : 'wait';
+      html += '<li class="ai-step ' + cls + '"><span class="dot" aria-hidden="true"></span><span><b>' + st.label + '</b>' +
+        (i === at && state === 'run' && st.note ? '<small>' + st.note + '</small>' : '') + '</span></li>';
+    });
+    html += '</ol>';
+    if (preview && (preview.identity || preview.namesakes)) {
+      html += '<div class="ai-preview">' + (preview.identity ? '<p><b>لقيته:</b> ' + esc(preview.identity) + '</p>' : '') +
+        (preview.namesakes ? '<p class="warn-line"><b>انتبه:</b> ' + esc(preview.namesakes) + '</p>' : '') + '</div>';
+    }
+    if (state === 'fail') {
+      html += '<p class="login-err" role="alert">' + esc(msg || 'صار خطأ') + '</p><div class="btns">' +
+        '<button class="btn primary" type="button" id="aiRetry">حاول مرة ثانية</button>' +
+        '<button class="btn ghost" type="button" id="aiCancel">إلغاء</button></div>';
+    } else {
+      html += '<p class="hint">خلّ الصفحة مفتوحة لين يخلص. ولو قفلتها، تقدر تكمّل بعدين من نفس المكان.</p>';
+    }
+    box.innerHTML = html;
+  }
+
+  var preview = null;
+  function runAi(input, jobId, at) {
+    var step = STEPS[at];
+    paintSteps(at, 'run', '', preview);
+    var body = jobId ? { op: step.op, id: jobId } : { op: 'start', sheikh: input.sheikh, hint: input.hint, topic: input.topic };
+    api('/api/gen', body).then(function (j) {
+      if (!jobId) { jobId = j.id; setSavedJob({ id: jobId, sheikh: input.sheikh }); if (ai && ai.limit != null) ai.used++; }
+      if (j.preview) preview = j.preview;
+      if (step.op === 'save') {
+        setSavedJob(null); preview = null;
+        location.hash = 's-' + j.majlisId;
+        return;
+      }
+      runAi(input, jobId, at + 1);
+    }, function (err) {
+      if (view !== 'home') return;
+      if (!jobId && err.status !== 0 && err.status !== 502 && err.status !== 504) {
+        // ما بدأ التوليد (حد يومي، موافقة، اسم ناقص): رجّع النموذج
+        document.getElementById('aiProgress').hidden = true;
+        document.getElementById('aiForm').hidden = false;
+        document.getElementById('ai-err').textContent = err.message;
+        return;
+      }
+      paintSteps(at, 'fail', err.status === 0 ? 'انقطع الاتصال. تأكد من النت وحاول مرة ثانية.' : err.message, preview);
+      document.getElementById('aiRetry').addEventListener('click', function () {
+        if (!jobId) { var sj = savedJob(); if (sj) jobId = sj.id; }
+        runAi(input, jobId, jobId ? at : 0);
+      });
+      document.getElementById('aiCancel').addEventListener('click', function () { setSavedJob(null); preview = null; openHome(); });
+    });
+  }
+
+  /* ================= ADMIN: users and AI approval ================= */
+  function openAdmin() {
+    leaveSession();
+    view = 'admin';
+    document.title = 'المستخدمون · مجالس المشايخ';
+    app.innerHTML =
+      '<header class="s-top wrap"><a class="back" href="#">‹ كل الجلسات</a><h1>المستخدمون</h1>' +
+      '<p class="lede">الحسابات الجديدة تستخدم الدفتر يدويًا على طول. فعّل «الذكاء الاصطناعي» للي تبيهم يجهّزون جلسات من رصيدك.</p></header>' +
+      '<main class="home-main wrap">' +
+      '<form class="limit-row" id="limitForm"><label for="lim">حد الجلسات بالذكاء الاصطناعي لكل مستخدم في اليوم</label>' +
+      '<input class="input" id="lim" type="number" min="0" max="50" inputmode="numeric" style="max-width:110px"><button class="btn" type="submit">حفظ</button><span class="hint" id="limMsg"></span></form>' +
+      '<div class="list" id="users"><p class="empty">جاري التحميل</p></div></main>';
+    document.getElementById('limitForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var n = Number(document.getElementById('lim').value);
+      api('/api/admin', { op: 'setLimit', limit: n }).then(function () { document.getElementById('limMsg').textContent = 'انحفظ'; }, function (er) { document.getElementById('limMsg').textContent = er.message; });
+    });
+    loadUsers();
+  }
+  function loadUsers() {
+    api('/api/admin').then(function (j) {
+      if (view !== 'admin') return;
+      document.getElementById('lim').value = j.limit;
+      var el = document.getElementById('users');
+      el.innerHTML = j.users.map(function (u) {
+        var isAdm = u.role === 'admin';
+        return '<div class="u-row" data-id="' + esc(u.id) + '"><div class="u-main"><div class="u-line"><b>' + esc(u.name) + '</b><span class="u-sub" dir="ltr">@' + esc(u.username) + '</span>' +
+          (isAdm ? '<span class="chip">المدير</span>' : '') + '</div>' +
+          '<span class="u-sub">' + ar(u.majalis) + ' جلسة · ' + ar(u.ai30) + ' بالذكاء الاصطناعي آخر ٣٠ يوم</span>' +
+          (u.about ? '<span class="u-sub">' + esc(u.about) + '</span>' : '') + '</div>' +
+          (isAdm ? '' : '<div class="u-act"><label class="asked"><input type="checkbox" data-ai ' + (u.aiAllowed ? 'checked' : '') + '><span>الذكاء الاصطناعي</span></label>' +
+            '<button class="icon-btn" type="button" data-del>حذف</button></div>') + '</div>';
+      }).join('') || '<p class="empty">ما فيه مستخدمين</p>';
+    }, function (er) { var el = document.getElementById('users'); if (el) el.innerHTML = '<p class="empty">' + esc(er.message) + '</p>'; });
+  }
+  app.addEventListener('change', function (e) {
+    if (view !== 'admin') return;
+    var t = e.target; if (!t.matches || !t.matches('input[data-ai]')) return;
+    var id = t.closest('.u-row').dataset.id;
+    t.disabled = true;
+    api('/api/admin', { op: 'setAi', id: id, allowed: t.checked }).then(function () { t.disabled = false; }, function (er) { t.disabled = false; t.checked = !t.checked; alertLine(er.message); });
+  });
+  app.addEventListener('click', function (e) {
+    if (view !== 'admin') return;
+    var b = e.target.closest('button[data-del]'); if (!b) return;
+    if (!b.classList.contains('arm')) { b.classList.add('arm'); b.textContent = 'تأكيد'; setTimeout(function () { b.classList.remove('arm'); b.textContent = 'حذف'; }, 3000); return; }
+    api('/api/admin', { op: 'deleteUser', id: b.closest('.u-row').dataset.id }).then(loadUsers, function (er) { alertLine(er.message); });
+  });
+  function alertLine(msg) { var m = document.getElementById('limMsg'); if (m) m.textContent = msg; }
 
   /* ================= SESSION ================= */
   var META_FIELDS = ['sheikh', 'topic', 'date', 'place', 'opening', 'briefing', 'books', 'general'];
