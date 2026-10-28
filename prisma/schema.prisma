@@ -10,13 +10,19 @@ datasource db {
   directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
+/// role: admin | user — aiAllowed: يقدر يولّد جلسات بالذكاء الاصطناعي (المدير يعتمده)
 model User {
   id           String   @id @default(cuid())
   name         String
   username     String   @unique
   passwordHash String
+  role         String   @default("user")
+  aiAllowed    Boolean  @default(false)
+  /// تعريف المستخدم بنفسه وطلابه، يساعد الذكاء الاصطناعي يفصّل الأسئلة عليه
+  about        String   @default("")
   createdAt    DateTime @default(now())
   majalis      Majlis[]
+  aiJobs       AiJob[]
 }
 
 /// مجلس مع شيخ
@@ -62,4 +68,24 @@ model Question {
 model Setting {
   key   String @id
   value String
+}
+
+/// توليد جلسة بالذكاء الاصطناعي على مراحل: research ← brief ← plan ← saved
+model AiJob {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sheikh    String
+  hint      String   @default("")
+  topic     String   @default("")
+  status    String   @default("new")
+  research  Json?
+  brief     Json?
+  plan      Json?
+  majlisId  String?
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
 }

@@ -9,6 +9,8 @@
 3. **Redeploy** (Deployments ← آخر رفع ← ⋯ ← Redeploy).
 4. افتح الموقع: أول مرة يطلب منك تسوي اسم المستخدم وكلمة المرور، ومجلس الشيخ مساعد الطيار يكون جاهز.
 
+**الذكاء الاصطناعي:** أضف `ANTHROPIC_API_KEY` (مفتاح Claude API من console.anthropic.com) ثم Redeploy. واختياريًا `MAJALIS_MODEL` لتغيير النموذج (الافتراضي `claude-sonnet-5-5`).
+
 متغيرات اختيارية: `AUTH_SECRET` (نص عشوائي ٣٢ حرفًا أو أكثر)، أو `SEED_ADMIN_USERNAME` و`SEED_ADMIN_PASSWORD` لإنشاء الحساب مع الرفع بدل شاشة أول مرة.
 
 > نسيت كلمة المرور؟ أضف `SEED_ADMIN_USERNAME` و`SEED_ADMIN_PASSWORD` الجديدة و`SEED_ADMIN_FORCE_PASSWORD=1` واعمل Redeploy، ثم احذف المتغير الأخير.

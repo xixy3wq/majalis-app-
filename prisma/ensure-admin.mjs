@@ -13,12 +13,13 @@ try {
   } else {
     const ex = await prisma.user.findUnique({ where: { username } });
     if (!ex) {
-      await prisma.user.create({ data: { name, username, passwordHash: await bcrypt.hash(password, 10) } });
+      await prisma.user.create({ data: { name, username, role: "admin", aiAllowed: true, passwordHash: await bcrypt.hash(password, 10) } });
       console.log("ADMIN_OK created");
     } else if (force) {
-      await prisma.user.update({ where: { username }, data: { passwordHash: await bcrypt.hash(password, 10) } });
+      await prisma.user.update({ where: { username }, data: { role: "admin", aiAllowed: true, passwordHash: await bcrypt.hash(password, 10) } });
       console.log("ADMIN_OK password reset");
     } else {
+      await prisma.user.update({ where: { username }, data: { role: "admin", aiAllowed: true } });
       console.log("ADMIN_OK exists");
     }
   }
