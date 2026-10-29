@@ -79,6 +79,53 @@ const SUM_SCHEMA = {
   required: ["summary", "answers", "extra", "guidance", "books"],
 };
 
+/* ---- وضع «درس كامل»: ملقي يشرح (قصص وشرح وفوائد)، والتلخيص شامل بدل توزيع على أسئلة ---- */
+const LESSON_RULES =
+  "أنت تساعد شخصًا سجّل درسًا أو محاضرة كاملة لملقٍ واحد غالبًا (شرح، قصص، مواعظ، فوائد). أمامك تفريغ آلي فيه أخطاء، وقد يكون مقسمًا على متكلمين.\n" +
+  "اكتب تلخيصًا شاملًا مرتبًا للدرس كله، كأنك طالب علم دوّن الدرس بعناية:\n" +
+  "1. حدّد الملقي (غالبًا صاحب أطول كلام) ولخّص كلامه هو، ولا تنسب له كلام الحاضرين.\n" +
+  "2. صحّح أخطاء التفريغ الواضحة من السياق (الآيات والأحاديث والأعلام وأسماء الكتب)، ولا تضف معلومة لم تُقل، ولا تكتب آية أو حديثًا بنص لم يقله الملقي.\n" +
+  "3. title: عنوان مناسب للدرس. idea: فكرة الدرس العامة في سطرين.\n" +
+  "4. sections: محاور الدرس بترتيب ورودها، لكل محور heading وpoints (نقاط تبدأ كل نقطة بـ «- »، بألفاظ الملقي قدر الإمكان، والعبارات المؤثرة حرفيًا بين «»). at وقت بداية المحور كما في التفريغ. غطِّ الدرس كاملًا ولا تهمل محورًا.\n" +
+  "5. stories: كل قصة أو موقف حكاه الملقي: title عنوان قصير، story القصة مختصرة بتسلسلها، lesson العبرة منها كما ذكرها أو كما تظهر من سياقه.\n" +
+  "6. evidence: الآيات والأحاديث والآثار والأبيات اللي استشهد بها، كل واحد في عنصر مع موضعه إن ذُكر.\n" +
+  "7. benefits: الفوائد العلمية والتربوية. guidance: التوجيهات العملية، كل توجيه جملة تبدأ بفعل. books: الكتب والمراجع المذكورة.\n" +
+  "8. summary: خلاصة الدرس في 4 إلى 8 أسطر، كل سطر يبدأ بـ «- ».\n" +
+  STYLE;
+const LESSON_SCHEMA = {
+  type: "object",
+  properties: {
+    speaker: STR, title: STR, idea: STR, summary: STR,
+    sections: { type: "array", items: { type: "object", properties: { heading: STR, points: STR, at: STR }, required: ["heading", "points"] } },
+    stories: { type: "array", items: { type: "object", properties: { title: STR, story: STR, lesson: STR }, required: ["title", "story"] } },
+    evidence: { type: "array", items: STR }, benefits: { type: "array", items: STR }, guidance: { type: "array", items: STR }, books: { type: "array", items: STR },
+  },
+  required: ["title", "idea", "summary", "sections", "stories", "evidence", "benefits", "guidance", "books"],
+};
+function cleanLesson(raw: any) {
+  const s = (v: unknown, max = 20000) => String(v ?? "").trim().slice(0, max);
+  const arr = (v: unknown) => (Array.isArray(v) ? v : []);
+  const lines = (v: unknown) => arr(v).map((x: any) => s(x, 1500).replace(/^[-•]\s*/, "")).filter(Boolean).slice(0, 80);
+  return {
+    mode: "lesson", speaker: s(raw.speaker, 10), title: s(raw.title, 200), idea: s(raw.idea, 1500), summary: s(raw.summary, 5000),
+    sections: arr(raw.sections).map((x: any) => ({ heading: s(x?.heading, 300), points: s(x?.points), at: s(x?.at, 12) })).filter((x) => x.heading && x.points).slice(0, 40),
+    stories: arr(raw.stories).map((x: any) => ({ title: s(x?.title, 300), story: s(x?.story, 6000), lesson: s(x?.lesson, 2000) })).filter((x) => x.story).slice(0, 30),
+    evidence: lines(raw.evidence), benefits: lines(raw.benefits), guidance: lines(raw.guidance), books: lines(raw.books),
+  };
+}
+/** ملخص الدرس كنص واحد مرتب (يُضاف للجلسة) */
+function lessonText(l: any) {
+  const out: string[] = [`ملخص الدرس (من التسجيل): ${l.title || ""}`.trim()];
+  if (l.idea) out.push("الفكرة العامة:\n" + l.idea);
+  for (const x of l.sections || []) out.push(`■ ${x.heading}\n${x.points}`);
+  if ((l.stories || []).length) out.push("القصص:\n" + l.stories.map((x: any) => `- ${x.title}: ${x.story}${x.lesson ? `\n  العبرة: ${x.lesson}` : ""}`).join("\n"));
+  if ((l.evidence || []).length) out.push("الشواهد:\n" + l.evidence.map((x: string) => "- " + x).join("\n"));
+  if ((l.benefits || []).length) out.push("الفوائد:\n" + l.benefits.map((x: string) => "- " + x).join("\n"));
+  if ((l.guidance || []).length) out.push("التوجيهات:\n" + l.guidance.map((x: string) => "- " + x).join("\n"));
+  if (l.summary) out.push("الخلاصة:\n" + l.summary);
+  return out.join("\n\n");
+}
+
 function cleanSummary(raw: any, qids: Set<string>) {
   const s = (v: unknown, max = 20000) => String(v ?? "").trim().slice(0, max);
   const arr = (v: unknown) => (Array.isArray(v) ? v : []);
@@ -196,8 +243,12 @@ export async function POST(req: Request) {
       await prisma.recording.update({ where: { id: r.id }, data: { status: "summarizing", error: "" } });
       try {
         const tr = r.transcript.length > 350000 ? r.transcript.slice(0, 350000) + "\n(…بقية التفريغ محذوفة لطولها)" : r.transcript;
-        const raw: any = await askClaudeJson({ system: SUM_RULES, prompt: sumPrompt(m) + "\n\n===\nالتفريغ:\n" + tr, name: "save_summary", schema: SUM_SCHEMA, maxTokens: 16000, deadlineMs: 285000 });
-        const summary = cleanSummary(raw, new Set(m.questions.map((q) => q.id)));
+        const lesson = b.mode === "lesson";
+        const head = `الملقي/الشيخ: ${m.sheikh}` + (m.topic ? `\nالموضوع: ${m.topic}` : "") + (m.date ? `\nالتاريخ: ${m.date}` : "");
+        const raw: any = lesson
+          ? await askClaudeJson({ system: LESSON_RULES, prompt: head + "\n\n===\nالتفريغ:\n" + tr, name: "save_lesson", schema: LESSON_SCHEMA, maxTokens: 20000, deadlineMs: 285000 })
+          : await askClaudeJson({ system: SUM_RULES, prompt: sumPrompt(m) + "\n\n===\nالتفريغ:\n" + tr, name: "save_summary", schema: SUM_SCHEMA, maxTokens: 16000, deadlineMs: 285000 });
+        const summary = lesson ? cleanLesson(raw) : cleanSummary(raw, new Set(m.questions.map((q) => q.id)));
         const r2 = await prisma.recording.update({ where: { id: r.id }, data: { status: "ready", summary: summary as any, error: "" } });
         return { rec: await view(r2, false) };
       } catch (e: any) {
@@ -212,6 +263,13 @@ export async function POST(req: Request) {
       if (r.status !== "ready" || !s) fail("ما فيه ملخص جاهز");
       const m = await ownMajlis(me.id, r.majlisId);
       const pick = b.pick || {};
+      if (s.mode === "lesson") {
+        const data: any = {};
+        if (pick.lesson) data.general = (m.general.trim() ? m.general.trim() + "\n\n" : "") + lessonText(s);
+        if (pick.books && (s.books || []).length) { const nb = s.books.filter((x: string) => !m.books.includes(x)); if (nb.length) data.books = (m.books.trim() ? m.books.trim() + "\n" : "") + nb.map((x: string) => "- " + x).join("\n"); }
+        await prisma.$transaction([...(Object.keys(data).length ? [prisma.majlis.update({ where: { id: m.id }, data })] : []), prisma.recording.update({ where: { id: r.id }, data: { status: "applied" } })]);
+        return { ok: true, answers: 0, extra: 0, notes: !!data.general, books: !!data.books };
+      }
       const ans = new Set<string>((Array.isArray(pick.answers) ? pick.answers : []).map(String));
       const ext = new Set<number>((Array.isArray(pick.extra) ? pick.extra : []).map(Number));
       const ops: any[] = [];

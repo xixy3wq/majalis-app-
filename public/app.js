@@ -2312,6 +2312,9 @@
     if (b && UP[sid]) b.style.width = UP[sid].pct + '%';
     if (t && UP[sid]) t.textContent = ar(UP[sid].pct) + '٪';
   }
+  // نوع التسجيل لكل جلسة: «qa» مجلس أسئلة (يوزّع على الأسئلة) أو «lesson» درس كامل (تلخيص شامل)
+  function recMode(sid) { try { return localStorage.getItem('recMode:' + sid) || 'qa'; } catch (e) { return 'qa'; } }
+  function setRecMode(sid, m) { try { localStorage.setItem('recMode:' + sid, m); } catch (e) {} }
   function recSectionHtml() {
     if (!recAllowed()) return '';
     return '<section class="sec" id="sec-rec" aria-labelledby="h-rec"><div class="sec-head"><h2 id="h-rec">التسجيل والتفريغ</h2></div>' +
@@ -2341,8 +2344,12 @@
         '<span class="hint">لا تقفل الجوال وقت التسجيل، لأن الآيفون يوقف الميكروفون في المتصفح إذا انقفلت الشاشة. اضغط «الشاشة السوداء» وحط الجوال على وجهه: يبان مطفي، والتسجيل شغال، ويستهلك بطارية أقل. والتسجيل ينحفظ في جهازك أول بأول.</span></div>';
       return;
     }
-    var other = REC && REC.sid !== sid;
-    el.innerHTML = (recNotice && recNotice.sid === sid ? '<p class="rec-warn">' + esc(recNotice.text) + '</p>' : '') + '<div class="btns">' +
+    var other = REC && REC.sid !== sid, md0 = recMode(sid);
+    el.innerHTML = (recNotice && recNotice.sid === sid ? '<p class="rec-warn">' + esc(recNotice.text) + '</p>' : '') +
+      '<div class="rec-mode" role="radiogroup" aria-label="نوع التسجيل">' +
+      '<button type="button" role="radio" data-rec="mode-qa" aria-checked="' + (md0 === 'qa') + '" class="' + (md0 === 'qa' ? 'on' : '') + '"><b>مجلس أسئلة</b><span>يوزّع أجوبة الشيخ على أسئلتك</span></button>' +
+      '<button type="button" role="radio" data-rec="mode-lesson" aria-checked="' + (md0 === 'lesson') + '" class="' + (md0 === 'lesson' ? 'on' : '') + '"><b>درس كامل</b><span>ملقي يشرح: تلخيص شامل بالمحاور والقصص والفوائد</span></button></div>' +
+      '<div class="btns">' +
       (recSupported() ? '<button class="btn primary" type="button" data-rec="start"' + (other ? ' disabled' : '') + '><span class="rec-dot" aria-hidden="true"></span> ابدأ التسجيل</button>' : '') +
       '<button class="btn" type="button" data-rec="file">ارفع ملف صوتي</button></div>' +
       (other ? '<p class="hint">فيه تسجيل شغال لمجلس ثاني، أنهه أول.</p>' : '') +
@@ -2388,14 +2395,52 @@
     var f = recState.flags || {}, b = [];
     var busy = recState.busy[r.id];
     if (!r.gone && f.asr && (r.status === 'uploaded' || r.status === 'error')) b.push('<button class="btn primary" type="button" data-ra="asr"' + (busy ? ' disabled' : '') + '>' + (r.status === 'error' ? 'أعد التفريغ' : 'فرّغ ولخّص') + '</button>');
-    if (r.status === 'transcribed' && f.ai) b.push('<button class="btn primary" type="button" data-ra="sum"' + (busy ? ' disabled' : '') + '>لخّص ووزّع على الأسئلة</button>');
+    if (r.status === 'transcribed' && f.ai) {
+      b.push('<button class="btn primary" type="button" data-ra="sumLesson"' + (busy ? ' disabled' : '') + '>لخّص كدرس كامل</button>');
+      b.push('<button class="btn" type="button" data-ra="sum"' + (busy ? ' disabled' : '') + '>لخّص ووزّع على الأسئلة</button>');
+    }
+    if ((r.status === 'ready' || r.status === 'applied') && f.ai && r.hasText) b.push('<button class="btn ghost" type="button" data-ra="' + (r.summary && r.summary.mode === 'lesson' ? 'sum' : 'sumLesson') + '"' + (busy ? ' disabled' : '') + '>' + (r.summary && r.summary.mode === 'lesson' ? 'لخّصه كأسئلة' : 'لخّصه كدرس كامل') + '</button>');
     if (r.hasText) b.push('<button class="btn" type="button" data-ra="text" aria-expanded="' + (recState.texts[r.id] ? 'true' : 'false') + '">' + (recState.texts[r.id] ? 'إخفاء التفريغ' : 'عرض التفريغ') + '</button>');
     if (r.play) b.push('<a class="btn ghost" href="' + esc(r.play) + '" download target="_blank" rel="noopener">تنزيل الصوت</a>');
     b.push('<button class="btn ghost" type="button" data-ra="del">حذف</button>');
     return '<div class="btns">' + b.join('') + '</div>';
   }
+  function lessonPlain(s) {
+    var o = ['📚 ' + (s.title || 'ملخص الدرس')];
+    if (s.idea) o.push('الفكرة العامة:\n' + s.idea);
+    (s.sections || []).forEach(function (x) { o.push('■ ' + x.heading + '\n' + x.points); });
+    if ((s.stories || []).length) o.push('القصص:\n' + s.stories.map(function (x) { return '- ' + x.title + ': ' + x.story + (x.lesson ? '\n  العبرة: ' + x.lesson : ''); }).join('\n'));
+    [['الشواهد', 'evidence'], ['الفوائد', 'benefits'], ['التوجيهات', 'guidance'], ['الكتب', 'books']].forEach(function (k) { if ((s[k[1]] || []).length) o.push(k[0] + ':\n' + s[k[1]].map(function (x) { return '- ' + x; }).join('\n')); });
+    if (s.summary) o.push('الخلاصة:\n' + s.summary);
+    return o.join('\n\n');
+  }
+  function lessonHtml(s) {
+    var li = function (a) { return '<ul class="plain">' + a.map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('') + '</ul>'; };
+    var out = ['<div class="rec-prev lesson"><p class="lesson-kicker">ملخص الدرس</p><h3>' + esc(s.title || 'الدرس') + '</h3>'];
+    if (s.idea) out.push('<p class="lesson-idea">' + esc(s.idea) + '</p>');
+    if ((s.sections || []).length) {
+      out.push('<h4>المحاور (' + ar(s.sections.length) + ')</h4><ol class="lesson-secs">');
+      s.sections.forEach(function (x) { out.push('<li><b>' + esc(x.heading) + '</b>' + tsBtn(x.at) + '<div class="rich">' + md(x.points) + '</div></li>'); });
+      out.push('</ol>');
+    }
+    if ((s.stories || []).length) {
+      out.push('<h4>القصص (' + ar(s.stories.length) + ')</h4>');
+      s.stories.forEach(function (x) { out.push('<div class="lesson-story"><b>' + esc(x.title) + '</b><p>' + esc(x.story) + '</p>' + (x.lesson ? '<p class="moral">العبرة: ' + esc(x.lesson) + '</p>' : '') + '</div>'); });
+    }
+    if ((s.evidence || []).length) out.push('<h4>الشواهد</h4>' + li(s.evidence));
+    if ((s.benefits || []).length) out.push('<h4>الفوائد</h4>' + li(s.benefits));
+    if ((s.guidance || []).length) out.push('<h4>التوجيهات</h4>' + li(s.guidance));
+    if ((s.books || []).length) out.push('<h4>الكتب والمراجع</h4>' + li(s.books));
+    if (s.summary) out.push('<h4>الخلاصة</h4><div class="rich">' + md(s.summary) + '</div>');
+    out.push('<pre class="lesson-txt" hidden>' + esc(lessonPlain(s)) + '</pre>');
+    out.push('<label class="pick"><input type="checkbox" data-pk="lesson" checked><b>أضف ملخص الدرس للجلسة</b> <span class="hint">ينضاف لـ «فوائد وأفكار للتطبيق»</span></label>');
+    if ((s.books || []).length) out.push('<label class="pick"><input type="checkbox" data-pk="books" checked><b>أضف الكتب (' + ar(s.books.length) + ')</b></label>');
+    out.push('<div class="btns"><button class="btn primary" type="button" data-ra="apply">أضف المحدد للجلسة</button><button class="btn" type="button" data-ra="copyLesson">نسخ الملخص</button><button class="btn ghost" type="button" data-ra="dismiss">تجاهل</button></div></div>');
+    return out.join('');
+  }
   function previewHtml(r) {
     var s = r.summary; if (!s || r.status !== 'ready') return '';
+    if (s.mode === 'lesson') return lessonHtml(s);
     var out = ['<div class="rec-prev"><h3>اللي طلع من التسجيل</h3><p class="hint">علّم على اللي تبيه ينضاف للجلسة. الأوقات بجانب الأجوبة تشغّل التسجيل من مكان الجواب.</p>'];
     if (s.summary) out.push('<label class="pick"><input type="checkbox" data-pk="summary" checked><b>ملخص المجلس</b> <span class="hint">ينضاف لـ «فوائد وأفكار للتطبيق»</span></label><div class="rich pick-body">' + md(s.summary) + '</div>');
     if ((s.answers || []).length) {
@@ -2458,13 +2503,14 @@
       })).then(function () { renderRecs(); schedulePoll(); });
     }, sm.length && !tr.length ? 15000 : 8000);
   }
-  function summarizeRec(id) {
+  function summarizeRec(id, mode) {
     if (recState.busy[id]) return;
+    mode = mode || recMode(recState.sid);
     recState.busy[id] = true;
     var r = recById(id); if (r) { r.status = 'summarizing'; r.error = ''; }
     renderRecs();
     flushAll();
-    api('/api/rec', { op: 'summarize', id: id }).then(function (j) {
+    api('/api/rec', { op: 'summarize', id: id, mode: mode }).then(function (j) {
       delete recState.busy[id]; putRec(j.rec); renderRecs();
       if (j.rec.status === 'ready') toast('جهز ملخص التسجيل، راجعه في قسم التسجيل');
     }, function (e) {
@@ -2475,7 +2521,7 @@
     });
   }
   function pickFrom(card) {
-    var p = { answers: [], extra: [], summary: false, guidance: false, books: false };
+    var p = { answers: [], extra: [], summary: false, guidance: false, books: false, lesson: false };
     card.querySelectorAll('input[data-pk]').forEach(function (i) {
       if (!i.checked) return;
       var k = i.dataset.pk;
@@ -2505,6 +2551,7 @@
         else if (b.dataset.rec === 'stop') recStop();
         else if (b.dataset.rec === 'dark') openDark();
         else if (b.dataset.rec === 'file') file.click();
+        else if (b.dataset.rec === 'mode-qa' || b.dataset.rec === 'mode-lesson') { setRecMode(sid, b.dataset.rec.slice(5)); paintRecPanel(sid); }
         return;
       }
       if (b.dataset.left) {
@@ -2537,7 +2584,11 @@
         recState.busy[id] = true; renderRecs();
         api('/api/rec', { op: 'transcribe', id: id }).then(function (j) { delete recState.busy[id]; putRec(j.rec); renderRecs(); schedulePoll(); toast('بدأ التفريغ'); },
           function (er) { delete recState.busy[id]; renderRecs(); toast(er.message); });
-      } else if (ra === 'sum') summarizeRec(id);
+      } else if (ra === 'sum') summarizeRec(id, 'qa');
+      else if (ra === 'sumLesson') summarizeRec(id, 'lesson');
+      else if (ra === 'copyLesson') {
+        var t = card.querySelector('.lesson-txt'); (navigator.clipboard && t ? navigator.clipboard.writeText(t.textContent) : Promise.reject()).then(function () { toast('انتسخ ملخص الدرس'); }, function () { toast('ما قدرت أنسخ'); });
+      }
       else if (ra === 'text') {
         if (recState.texts[id]) { delete recState.texts[id]; renderRecs(); return; }
         api('/api/rec', { op: 'transcript', id: id }).then(function (j) { recState.texts[id] = j.text || 'ما فيه نص'; renderRecs(); }, function (er) { toast(er.message); });
