@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { cleanUsername } from "@/lib/auth";
+import { notifyAdmin } from "@/lib/wa";
 export const dynamic = "force-dynamic";
 
 // تسجيل حساب جديد: ينتظر موافقة المدير قبل ما يقدر يدخل، والذكاء الاصطناعي موافقة ثانية منفصلة
@@ -17,5 +18,7 @@ export async function POST(req: Request) {
   if ((await prisma.user.count()) === 0) return NextResponse.json({ error: "الموقع جديد: أول حساب ينشأ من شاشة الإعداد" }, { status: 409 });
   if (await prisma.user.findUnique({ where: { username } })) return NextResponse.json({ error: "اسم المستخدم مأخوذ، اختر غيره" }, { status: 409 });
   await prisma.user.create({ data: { name, username, approved: false, passwordHash: await bcrypt.hash(password, 10) } });
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  await notifyAdmin("register", `طلب تسجيل جديد في دفتر مجالس المشايخ:\n${name} (@${username})` + (host ? `\nللموافقة: https://${host}/#admin` : ""));
   return NextResponse.json({ ok: true, pending: true });
 }

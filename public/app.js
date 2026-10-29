@@ -257,6 +257,7 @@
       '<main class="home-main wrap">' +
       pendingHtml() +
       aiPanelHtml() +
+      askHtml() +
       '<div class="btns"><button class="btn" id="newBtn" type="button">جلسة يدوية</button><button class="btn ghost" id="selMaj" type="button">تحديد للحذف</button></div>' +
       '<form class="new-form" id="newForm" hidden autocomplete="off">' +
       '<div class="new-grid">' +
@@ -274,6 +275,7 @@
       '<span class="hint">النسخة الاحتياطية ملف فيه كل شيء كتبته، احفظه عندك.</span></section></main>';
     var form = document.getElementById('newForm');
     wireSearch();
+    wireAsk();
     document.getElementById('selMaj').addEventListener('click', function () { startSel('majalis'); });
     document.getElementById('dlAllDoc').addEventListener('click', function (e) { exportAll('doc', e.target); });
     document.getElementById('dlAllJson').addEventListener('click', function (e) { exportAll('json', e.target); });
@@ -681,9 +683,13 @@
       '<main class="home-main wrap">' +
       '<form class="limit-row" id="limitForm"><label for="lim">حد الجلسات بالذكاء الاصطناعي لكل مستخدم في اليوم</label>' +
       '<input class="input" id="lim" type="number" min="0" max="50" inputmode="numeric" style="max-width:110px"><button class="btn" type="submit">حفظ</button><span class="hint" id="limMsg"></span></form>' +
+      '<section class="wa-card" aria-labelledby="wa-h"><div class="sec-head"><h2 id="wa-h">إشعارات واتساب</h2><span class="chip" id="waState"></span></div>' +
+      '<p class="lede">يوصلك على واتساب كل طلب تسجيل جديد، وتذكير قبل مجالسك بيوم. الإرسال من رقمك المربوط في «الواتس الذكي»، نفس موقع التسميع.</p>' +
+      '<div id="waBody"><p class="hint">جاري التحميل</p></div></section>' +
       '<div class="btns"><button class="btn ghost" id="selUsers" type="button">تحديد عدة مستخدمين</button></div>' +
       '<div class="list" id="users"><p class="empty">جاري التحميل</p></div></main>';
     document.getElementById('selUsers').addEventListener('click', function () { startSel('users'); });
+    loadWa();
     document.getElementById('limitForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var n = Number(document.getElementById('lim').value);
@@ -810,6 +816,11 @@
       '</div><div class="btns"><button class="btn primary" id="copyAll" type="button">نسخ الجلسة كاملة</button><button class="btn" id="copyQ" type="button">نسخ الأسئلة فقط</button>' +
       '<button class="btn" id="dlDoc" type="button">تنزيل Word</button><button class="btn" id="printBtn" type="button">طباعة أو PDF</button></div>' +
       '<span class="hint">ملف Word والطباعة فيها الأسئلة والأجوبة والفوائد والكتب، بدون التحضير وتحليل الشخصية.</span>' +
+      (aiOk() ? '<div class="ai-tools" id="aiTools"><span class="lbl">أدوات الذكاء الاصطناعي</span><div class="btns">' +
+        '<button class="btn" type="button" data-ai-tool="guidance">استخرج التوجيهات</button>' +
+        '<button class="btn" type="button" data-ai-tool="next">أسئلة للمجلس الجاي</button>' +
+        '<button class="btn" type="button" data-ai-tool="thanks">رسالة شكر للشيخ</button></div>' +
+        '<div class="ai-out" id="aiToolOut" hidden></div></div>' : '') +
       '<textarea id="copyBox" readonly hidden aria-label="النص للنسخ"></textarea></section>' +
       richSection('sec-brief', 'عن الشيخ', 'briefing', 'اكتب هنا ما تعرفه عن الشيخ وأسلوبه.') +
       '<div class="danger-zone"><button class="btn ghost" id="delSession" type="button">حذف الجلسة</button></div>' +
@@ -954,7 +965,9 @@
       '<span class="tools"><button class="icon-btn" type="button" data-act="up" aria-label="تقديم">↑</button><button class="icon-btn" type="button" data-act="down" aria-label="تأخير">↓</button>' +
       '<button class="icon-btn" type="button" data-act="edit">تعديل</button><button class="icon-btn" type="button" data-act="del">حذف</button></span></div>' +
       '<div class="field"><label for="ans-' + id + '">جواب الشيخ</label><textarea class="note answer" id="ans-' + id + '" placeholder="اكتب خلاصة جوابه هنا"></textarea>' +
-      '<div class="ans-tools"><button class="icon-btn star-btn" type="button" data-act="star">أضف المحدد للفوائد</button></div></div>' +
+      '<div class="ans-tools"><button class="icon-btn star-btn" type="button" data-act="star">أضف المحدد للفوائد</button>' +
+      (aiOk() ? '<button class="icon-btn ai-btn" type="button" data-act="tidy">رتّب بالذكاء الاصطناعي</button>' : '') + '</div>' +
+      '<div class="ai-prev" hidden></div></div>' +
       '</div>';
     return li;
   }
@@ -1060,6 +1073,7 @@
       var li = b.closest('.q'); var qid = li.dataset.qid; var q = cur.qs[qid]; if (!q) return;
       var actName = b.dataset.act;
       if (actName === 'star') { starFrom(li.querySelector('textarea.answer')); return; }
+      if (actName === 'tidy' || actName === 'tidyOk' || actName === 'tidyNo') { tidyAction(actName, qid, li, b); return; }
       if (actName === 'up' || actName === 'down') {
         var lst = sortedQs()[q.group];
         var i = lst.indexOf(qid), j = actName === 'up' ? i - 1 : i + 1;
@@ -1175,6 +1189,8 @@
     wire(document.getElementById('copyQ'), false);
     document.getElementById('dlDoc').addEventListener('click', function () { if (cur && cur.meta) download(fileName(curAsRecord()) + '.doc', docHtml([curAsRecord()]), 'application/msword'); });
     document.getElementById('printBtn').addEventListener('click', function () { if (cur && cur.meta) printRecords([curAsRecord()]); });
+    var aiTools = document.getElementById('aiTools');
+    if (aiTools) aiTools.addEventListener('click', function (e) { var b = e.target.closest('[data-ai-tool]'); if (b) runTool(b.dataset.aiTool, b); });
 
     var del = document.getElementById('delSession');
     del.addEventListener('click', function () {
@@ -1241,6 +1257,160 @@
         wake.want = true; wake.acquire().catch(function () { wake.want = false; wakeBtn.hidden = true; });
       });
     }
+  }
+
+  /* ================= AI TOOLS ================= */
+  function aiOk() { return !!(ai && ai.ready && ai.allowed); }
+  function renderRefs(html, refs) {
+    return html.replace(/\[\[(q|s):([a-z0-9]+)(?:~([a-z0-9]+))?\]\]/g, function (m, k, id, qid) {
+      var label = (refs && refs[id]) || 'الجلسة';
+      return '<a class="ref" href="#s-' + id + (k === 'q' && qid ? '~' + qid : '') + '">' + esc(label) + '</a>';
+    });
+  }
+  function askHtml() {
+    if (!aiOk()) return '';
+    return '<section class="ask-card" aria-labelledby="ask-h"><h2 id="ask-h">اسأل دفترك</h2>' +
+      '<p class="lede">اسأل عن أي شيء كتبته في جلساتك، مثل: «وين قال الشيخ إن التكرار أساس الحفظ؟» أو «وش قال المشايخ عن التدبر؟»</p>' +
+      '<form id="askForm" class="ask-form" autocomplete="off"><label class="lbl" for="askQ" hidden>سؤالك</label><input class="input" id="askQ" placeholder="اكتب سؤالك"><button class="btn primary" type="submit">اسأل</button></form>' +
+      '<div class="ai-out" id="askOut" hidden></div></section>';
+  }
+  function wireAsk() {
+    var f = document.getElementById('askForm'); if (!f) return;
+    f.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var q = document.getElementById('askQ').value.trim(), out = document.getElementById('askOut'), btn = f.querySelector('button');
+      if (q.length < 3) { toast('اكتب سؤالك'); return; }
+      out.hidden = false; out.innerHTML = '<p class="hint">يدوّر في جلساتك…</p>'; btn.disabled = true;
+      api('/api/assist', { op: 'ask', question: q }).then(function (j) {
+        btn.disabled = false;
+        out.innerHTML = '<div class="rich">' + renderRefs(md(j.answer), j.refs) + '</div><p class="hint">الروابط تفتح الجلسة والسؤال اللي جاءت منه المعلومة.</p>';
+      }, function (er) { btn.disabled = false; out.innerHTML = '<p class="login-err">' + esc(er.message) + '</p>'; });
+    });
+  }
+  function tidyAction(kind, qid, li, b) {
+    var box = li.querySelector('.ai-prev'), q = cur.qs[qid];
+    if (kind === 'tidyNo') { box.hidden = true; box.innerHTML = ''; return; }
+    if (kind === 'tidyOk') {
+      var t = box.dataset.text || '';
+      if (t) { q.answer = t; writeAnswer(qid, 0); var ta = li.querySelector('textarea.answer'); ta.value = t; grow(ta); toast('انحفظ الجواب المرتّب'); }
+      box.hidden = true; box.innerHTML = ''; return;
+    }
+    if (!(q.answer || '').trim()) { toast('اكتب الجواب أول'); return; }
+    b.disabled = true; var lbl = b.textContent; b.textContent = 'يرتّب…';
+    api('/api/assist', { op: 'tidy', qid: qid, answer: q.answer }).then(function (j) {
+      b.disabled = false; b.textContent = lbl;
+      box.dataset.text = j.answer || '';
+      box.hidden = false;
+      box.innerHTML = '<span class="lbl">الجواب بعد الترتيب</span><div class="ai-prev-text"></div>' +
+        '<div class="btns"><button class="btn primary" type="button" data-act="tidyOk">اعتمده بدل جوابي</button><button class="btn ghost" type="button" data-act="tidyNo">إلغاء</button></div>';
+      box.querySelector('.ai-prev-text').textContent = j.answer || '';
+    }, function (er) { b.disabled = false; b.textContent = lbl; toast(er.message); });
+  }
+  function runTool(kind, b) {
+    if (!cur) return;
+    var out = document.getElementById('aiToolOut'), sid = cur.sid;
+    flushAll();
+    b.disabled = true; var lbl = b.textContent; b.textContent = 'يجهّز…';
+    out.hidden = false; out.innerHTML = '<p class="hint">' + (kind === 'next' ? 'يجهّز أسئلة مبنية على أجوبة الشيخ…' : kind === 'thanks' ? 'يكتب رسالة الشكر…' : 'يقرأ أجوبة الشيخ ويستخرج التوجيهات…') + '</p>';
+    setTimeout(function () {
+      api('/api/assist', { op: kind, id: sid }).then(function (j) {
+        b.disabled = false; b.textContent = lbl;
+        if (!cur || cur.sid !== sid) return;
+        if (kind === 'guidance') {
+          out.innerHTML = '<span class="lbl">التوجيهات العملية</span><div class="rich"></div>' +
+            '<div class="btns"><button class="btn primary" type="button" id="gAdd">أضفها للفوائد</button><button class="btn ghost" type="button" id="gNo">إغلاق</button></div>';
+          out.querySelector('.rich').innerHTML = md(j.lines);
+          document.getElementById('gAdd').addEventListener('click', function () {
+            var g = cur.meta.general || '';
+            cur.meta.general = (g.trim() ? g.replace(/\s+$/, '') + '\n' : '') + j.lines.trim();
+            writeMeta('general', 0); paintMeta(); out.hidden = true; toast('انضافت للفوائد');
+          });
+          document.getElementById('gNo').addEventListener('click', function () { out.hidden = true; });
+        } else if (kind === 'thanks') {
+          out.innerHTML = '<label class="lbl" for="thTxt">رسالة الشكر (تقدر تعدّلها)</label><textarea class="note" id="thTxt"></textarea>' +
+            '<div class="btns"><button class="btn primary" type="button" id="thCopy">نسخ</button><a class="btn" id="thWa" target="_blank" rel="noopener">فتح واتساب</a><button class="btn ghost" type="button" id="thNo">إغلاق</button></div>';
+          var ta = document.getElementById('thTxt'); ta.value = j.text; grow(ta);
+          var wa = document.getElementById('thWa');
+          function upd() { wa.href = 'https://wa.me/?text=' + encodeURIComponent(ta.value); }
+          upd(); ta.addEventListener('input', function () { upd(); grow(ta); });
+          document.getElementById('thCopy').addEventListener('click', function () {
+            try { navigator.clipboard.writeText(ta.value).then(function () { toast('انتسخت الرسالة'); }, function () { ta.select(); }); } catch (e) { ta.select(); }
+          });
+          document.getElementById('thNo').addEventListener('click', function () { out.hidden = true; });
+        } else {
+          out.innerHTML = '<span class="lbl">أسئلة مقترحة للمجلس الجاي مع ' + esc(j.sheikh || 'الشيخ') + '</span><ul class="next-list">' + j.questions.map(function (q, i) {
+            return '<li><label class="asked"><input type="checkbox" checked data-i="' + i + '"><span class="nq"><b></b><small></small></span></label></li>';
+          }).join('') + '</ul><div class="btns"><button class="btn primary" type="button" id="nCreate">أنشئ جلسة جديدة بالمحدد</button><button class="btn ghost" type="button" id="nNo">إغلاق</button></div>';
+          out.querySelectorAll('.next-list li').forEach(function (li, i) { li.querySelector('b').textContent = j.questions[i].text; li.querySelector('small').textContent = j.questions[i].why || ''; });
+          document.getElementById('nNo').addEventListener('click', function () { out.hidden = true; });
+          document.getElementById('nCreate').addEventListener('click', function (e) {
+            var picked = Array.prototype.filter.call(out.querySelectorAll('input[data-i]'), function (c) { return c.checked; }).map(function (c) { return j.questions[+c.dataset.i]; });
+            if (!picked.length) { toast('حدد سؤال واحد على الأقل'); return; }
+            var btn = e.target; btn.disabled = true; btn.textContent = 'جاري الإنشاء';
+            var nid = newId();
+            act('createMajlis', { id: nid, fields: { sheikh: j.sheikh || cur.meta.sheikh, topic: 'متابعة' + (j.topic ? ': ' + j.topic : '') } }).then(function (r) {
+              var mid = r.id || nid, chain = Promise.resolve();
+              picked.forEach(function (q, i) { chain = chain.then(function () { return act('addQ', { majlisId: mid, id: newId(), fields: { text: q.text, why: q.why || '', group: 'core', order: i } }); }); });
+              return chain.then(function () { location.hash = 's-' + mid; });
+            }).catch(function (er) { btn.disabled = false; btn.textContent = 'أنشئ جلسة جديدة بالمحدد'; toast(er.message); });
+          });
+        }
+      }, function (er) { b.disabled = false; b.textContent = lbl; out.innerHTML = '<p class="login-err">' + esc(er.message) + '</p>'; });
+    }, 300);
+  }
+
+  /* ================= ADMIN: WhatsApp notifications ================= */
+  function loadWa(devices) {
+    api('/api/admin', { op: 'waGet' }).then(function (st) { if (view === 'admin') renderWa(st, devices); }, function (er) { var b = document.getElementById('waBody'); if (b) b.innerHTML = '<p class="login-err">' + esc(er.message) + '</p>'; });
+  }
+  function renderWa(st, devices) {
+    var body = document.getElementById('waBody'); if (!body) return;
+    var chip = document.getElementById('waState'); chip.textContent = st.linked ? 'مربوط' : 'مو مربوط'; chip.classList.toggle('off', !st.linked);
+    var html = '';
+    if (devices && devices.length) {
+      html += '<div class="wa-pick"><p>حسابك فيه أكثر من رقم مربوط. اختر الرقم اللي ترسل منه:</p>' + devices.map(function (d, i) {
+        return '<button class="btn" type="button" data-wa-dev="' + esc(d.id) + '">' + esc(d.name || 'رقم ' + ar(i + 1)) + '</button>';
+      }).join('') + '</div>';
+    } else if (!st.linked) {
+      html += '<form class="wa-form" id="waLinkForm" autocomplete="off"><b>١. اربط حسابك في الواتس الذكي</b>' +
+        '<div class="new-grid"><div class="field"><label for="wa-ph">رقم حسابك في الواتس الذكي</label><input class="input" id="wa-ph" dir="ltr" inputmode="tel" placeholder="05xxxxxxxx"></div>' +
+        '<div class="field"><label for="wa-pw">كلمة المرور</label><input class="input" id="wa-pw" type="password" dir="ltr" autocomplete="off"></div></div>' +
+        '<span class="hint">نفس الرقم وكلمة المرور اللي تدخل فيها موقع الواتس الذكي. كلمة المرور ما تنحفظ، تُستخدم مرة وحدة للربط.</span>' +
+        '<div class="btns"><button class="btn primary" type="submit">اربط</button></div></form>';
+    }
+    html += '<form class="wa-form" id="waSaveForm" autocomplete="off"><b>' + (st.linked ? '' : '٢. ') + 'وين توصلك الإشعارات</b>' +
+      '<div class="field"><label for="wa-to">رقم جوالك</label><input class="input" id="wa-to" dir="ltr" inputmode="tel" placeholder="05xxxxxxxx" value="' + esc(st.notifyPhone || '') + '"></div>' +
+      '<label class="asked"><input type="checkbox" id="wa-reg"' + (st.onRegister ? ' checked' : '') + '><span>لما أحد يسجّل وينتظر موافقتك</span></label>' +
+      '<label class="asked"><input type="checkbox" id="wa-rem"' + (st.onReminder ? ' checked' : '') + '><span>تذكير قبل مجالسك بيوم (العصر تقريبًا)</span></label>' +
+      '<div class="btns"><button class="btn primary" type="submit">حفظ</button>' +
+      (st.linked ? '<button class="btn" type="button" id="waTest">رسالة تجريبية</button><button class="btn ghost" type="button" id="waUnlink">إلغاء الربط</button>' : '') + '</div></form>';
+    body.innerHTML = html;
+    var lf = document.getElementById('waLinkForm');
+    if (lf) lf.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var btn = lf.querySelector('button'); btn.disabled = true; btn.textContent = 'جاري الربط';
+      api('/api/admin', { op: 'waLink', phone: document.getElementById('wa-ph').value, password: document.getElementById('wa-pw').value }).then(function (j) {
+        toast(j.linked ? 'انربط الواتساب' : 'اختر الرقم'); loadWa(j.devices);
+      }, function (er) { btn.disabled = false; btn.textContent = 'اربط'; document.getElementById('wa-pw').value = ''; toast(er.message); });
+    });
+    body.querySelectorAll('[data-wa-dev]').forEach(function (b) {
+      b.addEventListener('click', function () { api('/api/admin', { op: 'waPick', device: b.dataset.waDev }).then(function () { toast('انربط الواتساب'); loadWa(); }, function (er) { toast(er.message); }); });
+    });
+    document.getElementById('waSaveForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      api('/api/admin', { op: 'waSave', notifyPhone: document.getElementById('wa-to').value, onRegister: document.getElementById('wa-reg').checked, onReminder: document.getElementById('wa-rem').checked })
+        .then(function () { toast('انحفظ'); }, function (er) { toast(er.message); });
+    });
+    var tb = document.getElementById('waTest');
+    if (tb) tb.addEventListener('click', function () {
+      tb.disabled = true;
+      api('/api/admin', { op: 'waTest' }).then(function () { tb.disabled = false; toast('انرسلت، شيك على جوالك'); }, function (er) { tb.disabled = false; toast(er.message); });
+    });
+    var ub = document.getElementById('waUnlink');
+    if (ub) ub.addEventListener('click', function () {
+      if (!ub.classList.contains('arm')) { ub.classList.add('arm'); ub.textContent = 'تأكيد إلغاء الربط'; return; }
+      api('/api/admin', { op: 'waUnlink' }).then(function () { toast('انلغى الربط'); loadWa(); }, function (er) { toast(er.message); });
+    });
   }
 
   /* ================= THEME: system / dark / light ================= */

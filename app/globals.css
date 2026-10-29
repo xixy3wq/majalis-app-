@@ -356,3 +356,30 @@ html.selecting [data-sel]::after {
 }
 html.selecting [data-sel].is-sel { border-color: var(--warn); }
 html.selecting [data-sel].is-sel::after { content: "✓"; background: var(--warn); border-color: var(--warn); }
+
+/* AI tools */
+.ai-btn { font-size: 13.5px; color: var(--accent); padding: 0 10px; }
+.ans-tools { flex-wrap: wrap; gap: 4px; }
+.ai-prev, .ai-out { display: grid; gap: 10px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; }
+.ai-prev-text { white-space: pre-wrap; line-height: 1.85; }
+.ai-tools { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 16px; }
+.ask-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; display: grid; gap: 10px; }
+.ask-card h2 { font-size: 25px; }
+.ask-form { display: flex; gap: 8px; }
+.ask-form .input { flex: 1; min-width: 0; background: var(--bg); }
+.ref { display: inline-block; font-size: 13px; font-weight: 600; text-decoration: none; color: var(--accent); background: var(--surface); border: 1px solid var(--accent); border-radius: 999px; padding: 0 10px; margin-inline-start: 4px; white-space: nowrap; }
+.next-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.next-list .asked { align-items: flex-start; color: var(--fg); min-height: 0; padding-block: 4px; }
+.next-list .asked input { flex: none; margin-top: 4px; }
+.nq { display: grid; gap: 2px; }
+.nq b { font-weight: 500; line-height: 1.7; }
+.nq small { color: var(--muted); font-size: 13.5px; }
+
+/* WhatsApp settings */
+.wa-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; display: grid; gap: 12px; }
+.wa-card h2 { font-size: 24px; }
+.wa-form { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
+.wa-form .input { background: var(--bg); }
+.wa-pick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.wa-pick p { flex-basis: 100%; }
+.chip.off { color: var(--warn); background: var(--gold-soft); }

@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { fail, handle, requireUser } from "@/lib/auth";
 import { dailyLimit } from "@/lib/limits";
+import { intlPhone, saveWa, smartLogin, waCfg, waSend } from "@/lib/wa";
 export const dynamic = "force-dynamic";
 
 async function requireAdmin() {
@@ -19,7 +20,7 @@ export async function GET() {
       orderBy: [{ approved: "asc" }, { createdAt: "desc" }],
       select: { id: true, name: true, username: true, role: true, aiAllowed: true, approved: true, about: true, createdAt: true, _count: { select: { majalis: true } } },
     });
-    const jobs = await prisma.aiJob.groupBy({ by: ["userId"], where: { createdAt: { gte: since } }, _count: { _all: true } });
+    const jobs = await prisma.aiJob.groupBy({ by: ["userId"], where: { createdAt: { gte: since }, status: { not: "tool" } }, _count: { _all: true } });
     const jm: Record<string, number> = {};
     jobs.forEach((j) => { jm[j.userId] = j._count._all; });
     return {
@@ -61,6 +62,48 @@ export async function POST(req: Request) {
       if (!Number.isFinite(n)) fail("اكتب رقم");
       await prisma.setting.upsert({ where: { key: "ai_daily_limit" }, create: { key: "ai_daily_limit", value: String(n) }, update: { value: String(n) } });
       return { ok: true, limit: n };
+    }
+    // ---------- إشعارات واتساب ----------
+    if (b.op === "waGet") {
+      const c = await waCfg();
+      return { linked: !!(c.jwt && c.device), choosing: !!(c.jwt && !c.device), notifyPhone: c.notifyPhone, onRegister: c.onRegister, onReminder: c.onReminder };
+    }
+    if (b.op === "waLink") {
+      const r: any = await smartLogin(String(b.phone || ""), String(b.password || ""));
+      if (r.error) fail(r.error);
+      const c = await waCfg();
+      c.jwt = r.jwt; c.device = r.devices.length === 1 ? r.devices[0].id : "";
+      if (!c.notifyPhone) c.notifyPhone = String(b.phone || "");
+      await saveWa(c);
+      if (!r.devices.length) fail("دخلنا حسابك بس ما لقينا رقم واتساب مربوط فيه. اربط جوالك من موقع الواتس الذكي (امسح الباركود) وارجع اضغط «اربط».");
+      return { linked: !!c.device, devices: r.devices.length > 1 ? r.devices : [] };
+    }
+    if (b.op === "waPick") {
+      const c = await waCfg();
+      if (!c.jwt) fail("اربط حسابك أول");
+      if (!/^[a-f0-9]{24}$/i.test(String(b.device || ""))) fail("اختر رقم من القائمة");
+      c.device = String(b.device); await saveWa(c);
+      return { linked: true };
+    }
+    if (b.op === "waSave") {
+      const c = await waCfg();
+      const phone = String(b.notifyPhone || "").trim();
+      if (phone && !intlPhone(phone)) fail("رقم الجوال غير صحيح");
+      c.notifyPhone = phone; c.onRegister = !!b.onRegister; c.onReminder = !!b.onReminder;
+      await saveWa(c);
+      return { ok: true };
+    }
+    if (b.op === "waTest") {
+      const c = await waCfg();
+      if (!c.jwt || !c.device) fail("اربط حسابك في الواتس الذكي أول");
+      if (!intlPhone(c.notifyPhone)) fail("اكتب رقمك واحفظ أول");
+      const r = await waSend(c, c.notifyPhone, "رسالة تجريبية من دفتر مجالس المشايخ. الإشعارات شغالة.");
+      if (!r.ok) fail("ما وصلت الرسالة للمزوّد: " + r.resp.slice(0, 150));
+      return { ok: true };
+    }
+    if (b.op === "waUnlink") {
+      const c = await waCfg(); c.jwt = ""; c.device = ""; await saveWa(c);
+      return { ok: true };
     }
     if (b.op === "deleteUsers" || b.op === "approveMany") {
       const ids = Array.isArray(b.ids) ? b.ids.map(String).slice(0, 500) : [];

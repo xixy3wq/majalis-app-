@@ -7,5 +7,5 @@ export async function dailyLimit() {
 }
 export async function usedToday(userId: string) {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  return prisma.aiJob.count({ where: { userId, createdAt: { gte: since } } });
+  return prisma.aiJob.count({ where: { userId, createdAt: { gte: since }, status: { not: "tool" } } });
 }
