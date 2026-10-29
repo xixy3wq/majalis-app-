@@ -23,6 +23,7 @@ prisma/db-sync.mjs        ← تجهيز الجداول مع كل رفع (يتخ
 prisma/ensure-admin.mjs   ← إنشاء حسابك من المتغيرات (اختياري)
 prisma/seed-first.mjs     ← إضافة مجلس الشيخ مساعد الطيار مرة وحدة
 prisma/seed-masaed.json   ← بيانات ذاك المجلس
+prisma/seed-masaed-2026-10-28.json ← ملخص مجلس 28 أكتوبر من التسجيل (ينضاف لحساب المدير مع الرفع)
 app/api/setup|login|logout|data|majlis|act
 public/app.js             ← الواجهة كاملة
 app/globals.css           ← التصميم (فاتح وداكن)
