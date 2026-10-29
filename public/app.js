@@ -2,6 +2,15 @@
 (function () {
   'use strict';
   var app = document.getElementById('app');
+  // رقم نسخة هذا الملف (من رابطه)، نقارنه برقم النسخة المنشورة عشان الصفحة القديمة تحدّث نفسها
+  var MY_BUILD = ((document.currentScript && document.currentScript.src || '').match(/[?&]v=([^&]+)/) || [])[1] || '';
+  function checkBuild(j) {
+    if (!j || !j.build || !MY_BUILD || j.build === MY_BUILD || j.build === 'dev') return;
+    var k = 'majalis-reload-' + j.build;
+    try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); } catch (e) { return; }
+    if (typeof REC !== 'undefined' && REC) return; // لا نقطع تسجيل شغال
+    location.reload();
+  }
   var GROUPS = [
     { key: 'core', label: 'الأساسية', note: 'بالترتيب' },
     { key: 'ask', label: 'طلب في آخر اللقاء', note: '' },
@@ -156,6 +165,7 @@
     var sh = shareTokenFromHash();
     if (sh) { renderShare(sh); return; }
     api('/api/data').then(function (j) {
+      checkBuild(j);
       me = j.me; ai = j.ai || null; list = j.majalis || []; listLoaded = true; netState = 'live'; pendingN = j.pending || 0;
       route();
     }, function (e) {
@@ -1011,7 +1021,7 @@
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') { flushAll(); return; }
     if (view === 'session' && cur && cur.loaded && !anyPending()) loadSession(cur.sid, false);
-    if (view === 'home') api('/api/data').then(function (j) { list = j.majalis || []; if (view === 'home') renderList(); }, function () {});
+    if (view === 'home') api('/api/data').then(function (j) { checkBuild(j); list = j.majalis || []; if (view === 'home') renderList(); }, function () {});
   });
 
   function richSection(id, title, field, placeholder) {

@@ -3,6 +3,7 @@ import { fail, handle, requireUser } from "@/lib/auth";
 import { aiReady } from "@/lib/claude";
 import { blobReady } from "@/lib/blob";
 import { asrReady } from "@/lib/asr";
+import { BUILD } from "@/lib/version";
 import { dailyLimit, usedToday } from "@/lib/limits";
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export async function GET() {
     asked.forEach((a) => { am[a.majlisId] = a._count._all; });
     const pending = me.role === "admin" ? await prisma.user.count({ where: { approved: false, role: { not: "admin" } } }) : 0;
     return {
+      build: BUILD,
       me: { id: me.id, name: me.name, role: me.role, about: me.about },
       pending,
       ai: { ready: aiReady(), allowed: me.role === "admin" || me.aiAllowed, admin: me.role === "admin", store: blobReady(), asr: asrReady(), limit: me.role === "admin" ? null : await dailyLimit(), used: await usedToday(me.id) },
