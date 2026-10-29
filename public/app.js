@@ -13,6 +13,15 @@
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function newId() { return (Date.now().toString(36) + Math.random().toString(36).slice(2, 9)).replace(/[^a-z0-9]/g, ''); }
   function str(v) { return typeof v === 'string' ? v : ''; }
+  function nMin(n) { return n === 1 ? 'دقيقة' : n === 2 ? 'دقيقتين' : n >= 3 && n <= 10 ? ar(n) + ' دقائق' : ar(n) + ' دقيقة'; }
+  function nQ(n) { return n === 1 ? 'سؤال واحد' : n === 2 ? 'سؤالين' : n >= 3 && n <= 10 ? ar(n) + ' أسئلة' : ar(n) + ' سؤال'; }
+  var toastTimer = null;
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); t.setAttribute('aria-live', 'polite'); document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add('on');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove('on'); }, 2600);
+  }
 
   /* ---------- API ---------- */
   function ApiErr(status, msg) { this.status = status; this.message = msg; }
@@ -162,7 +171,7 @@
     else openHome();
   }
   window.addEventListener('hashchange', route);
-  function leaveSession() { if (!cur) return; flushAll(); cur = null; }
+  function leaveSession() { closeFocus(true); if (!cur) return; flushAll(); cur = null; }
 
   /* ================= LOGIN / FIRST-RUN SETUP ================= */
   function showLogin() {
@@ -484,7 +493,7 @@
       '<button type="button" data-jump="sec-q">الأسئلة</button>' +
       '<button type="button" data-jump="sec-notes">ملاحظات عامة</button>' +
       '<button type="button" data-jump="sec-brief">عن الشيخ</button>' +
-      '</div><span class="status" id="status" data-s="connecting" role="status" aria-live="polite">جاري التجهيز</span></div></nav>' +
+      '</div><span class="timer-pill" id="timerPill" hidden></span><span class="status" id="status" data-s="connecting" role="status" aria-live="polite">جاري التجهيز</span></div></nav>' +
       '<main class="s-main wrap">' +
       '<p class="empty" id="loading">جاري تحميل الجلسة</p>' +
       '<div id="sessionBody" hidden style="display:grid;gap:52px">' +
@@ -492,7 +501,14 @@
       '<section class="sec" id="sec-q" aria-labelledby="h-q"><div class="sec-head"><h2 id="h-q">الأسئلة</h2></div>' +
       '<p class="lede">علّم على السؤال بعد ما تسأله، واكتب خلاصة جوابه تحته. وإذا طرأ لك سؤال أثناء الجلسة، أضفه من تحت.</p>' +
       '<div class="q-tools"><span class="progress" id="progress"></span><div class="btns">' +
+      '<button class="btn primary" id="focusBtn" type="button">وضع المجلس</button>' +
+      '<button class="btn" id="timerBtn" type="button" aria-expanded="false">المؤقت</button>' +
       '<button class="btn" id="wakeBtn" type="button" aria-pressed="false" hidden>إبقاء الشاشة شغالة</button></div></div>' +
+      '<form class="timer-panel" id="timerPanel" hidden autocomplete="off">' +
+      '<label for="tm-min">مدة المجلس بالدقائق</label><input class="input" id="tm-min" type="number" min="5" max="300" step="5" inputmode="numeric" value="45">' +
+      '<button class="btn primary" type="submit" id="tmStart">ابدأ المؤقت</button><button class="btn ghost" type="button" id="tmStop" hidden>إيقاف المؤقت</button>' +
+      '<span class="hint">إذا قرب الوقت يخلص، ينبهك على الأسئلة الأساسية اللي ما سألتها.</span></form>' +
+      '<p class="time-alert" id="timeAlert" hidden></p>' +
       '<div class="groups" id="groups"></div>' +
       '<form class="add-q" id="addQ" autocomplete="off"><span class="lbl">سؤال جديد</span>' +
       '<textarea class="note" id="aq-text" placeholder="اكتب السؤال" style="min-height:72px"></textarea>' +
@@ -645,7 +661,8 @@
       '<div class="q-row"><label class="asked" for="ck-' + id + '"><input type="checkbox" id="ck-' + id + '"><span>سألته</span></label>' +
       '<span class="tools"><button class="icon-btn" type="button" data-act="up" aria-label="تقديم">↑</button><button class="icon-btn" type="button" data-act="down" aria-label="تأخير">↓</button>' +
       '<button class="icon-btn" type="button" data-act="edit">تعديل</button><button class="icon-btn" type="button" data-act="del">حذف</button></span></div>' +
-      '<div class="field"><label for="ans-' + id + '">جواب الشيخ</label><textarea class="note answer" id="ans-' + id + '" placeholder="اكتب خلاصة جوابه هنا"></textarea></div>' +
+      '<div class="field"><label for="ans-' + id + '">جواب الشيخ</label><textarea class="note answer" id="ans-' + id + '" placeholder="اكتب خلاصة جوابه هنا"></textarea>' +
+      '<div class="ans-tools"><button class="icon-btn star-btn" type="button" data-act="star">أضف المحدد للفوائد</button></div></div>' +
       '</div>';
     return li;
   }
@@ -678,6 +695,7 @@
     var core = by.core, done = core.filter(function (id) { return cur.qs[id].asked; }).length;
     document.getElementById('progress').textContent = n === 0 ? '' :
       (done === 0 ? 'ما سألت شيئًا بعد' : 'سألت ' + ar(done) + ' من ' + ar(core.length) + ' أسئلة أساسية');
+    paintTimer();
   }
 
   function paintQ(id, num, first, last) {
@@ -749,6 +767,7 @@
       var b = e.target.closest('button[data-act]'); if (!b) return;
       var li = b.closest('.q'); var qid = li.dataset.qid; var q = cur.qs[qid]; if (!q) return;
       var actName = b.dataset.act;
+      if (actName === 'star') { starFrom(li.querySelector('textarea.answer')); return; }
       if (actName === 'up' || actName === 'down') {
         var lst = sortedQs()[q.group];
         var i = lst.indexOf(qid), j = actName === 'up' ? i - 1 : i + 1;
@@ -880,6 +899,27 @@
       }, function () { del.disabled = false; del.classList.remove('arm'); del.textContent = 'ما انحذفت، جرّب مرة ثانية'; });
     });
 
+    document.getElementById('focusBtn').addEventListener('click', openFocus);
+    var timerBtn = document.getElementById('timerBtn'), panel = document.getElementById('timerPanel');
+    timerBtn.addEventListener('click', function () {
+      panel.hidden = !panel.hidden; timerBtn.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
+      var st = timerState(cur.sid);
+      document.getElementById('tmStop').hidden = !st;
+      document.getElementById('tmStart').textContent = st ? 'ابدأ من جديد' : 'ابدأ المؤقت';
+      if (st) document.getElementById('tm-min').value = st.dur;
+    });
+    panel.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var m = Math.round(Number(document.getElementById('tm-min').value));
+      if (!(m >= 5 && m <= 300)) { toast('اكتب مدة من ٥ إلى ٣٠٠ دقيقة'); return; }
+      setTimerState(cur.sid, { start: Date.now(), dur: m });
+      panel.hidden = true; timerBtn.setAttribute('aria-expanded', 'false');
+      paintTimer(); toast('بدأ المؤقت: ' + nMin(m));
+    });
+    document.getElementById('tmStop').addEventListener('click', function () {
+      setTimerState(cur.sid, null); panel.hidden = true; timerBtn.setAttribute('aria-expanded', 'false'); paintTimer();
+    });
+
     var wakeBtn = document.getElementById('wakeBtn');
     if ('wakeLock' in navigator) {
       wakeBtn.hidden = false;
@@ -889,6 +929,137 @@
         wake.want = true; wake.acquire().catch(function () { wake.want = false; wakeBtn.hidden = true; });
       });
     }
+  }
+
+  /* ================= SESSION TIMER ================= */
+  var TKEY = 'majalis-timer-v1';
+  function timerAll() { try { return JSON.parse(localStorage.getItem(TKEY) || '{}') || {}; } catch (e) { return {}; } }
+  function timerState(sid) { var t = timerAll()[sid]; return t && t.start && t.dur ? t : null; }
+  function setTimerState(sid, v) { var all = timerAll(); if (v) all[sid] = v; else delete all[sid]; try { localStorage.setItem(TKEY, JSON.stringify(all)); } catch (e) {} }
+  function paintTimer() {
+    if (view !== 'session' || !cur) return;
+    var st = timerState(cur.sid);
+    var pills = [document.getElementById('timerPill'), document.getElementById('fTimer')];
+    var alertEl = document.getElementById('timeAlert');
+    var urgent = {};
+    if (!st) {
+      pills.forEach(function (p) { if (p) p.hidden = true; });
+      if (alertEl) alertEl.hidden = true;
+    } else {
+      var leftMs = st.start + st.dur * 60000 - Date.now();
+      var left = Math.ceil(leftMs / 60000);
+      var low = left <= Math.max(5, Math.round(st.dur * 0.25));
+      var txt = left > 0 ? 'باقي ' + nMin(left) : 'انتهى الوقت';
+      pills.forEach(function (p) { if (!p) return; p.hidden = false; p.textContent = txt; p.classList.toggle('low', low); });
+      var by = cur.loaded ? sortedQs() : { core: [] };
+      var open = by.core.filter(function (id) { return cur.qs[id] && !cur.qs[id].asked; });
+      if (alertEl) {
+        if (low && open.length) {
+          alertEl.hidden = false;
+          alertEl.textContent = (left > 0 ? 'باقي ' + nMin(left) : 'انتهى وقت المجلس') + '، وباقي ' + nQ(open.length) + ' من الأساسية ما سألتها. المعلّمة بالأحمر هي الأهم.';
+          open.slice(0, 3).forEach(function (id) { urgent[id] = true; });
+        } else alertEl.hidden = true;
+      }
+    }
+    Object.keys(cur.els).forEach(function (id) { cur.els[id].classList.toggle('urgent', !!urgent[id]); });
+  }
+  setInterval(function () { if (document.visibilityState === 'visible') paintTimer(); }, 15000);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') paintTimer(); });
+
+  /* ================= STAR: selected answer text goes to the benefits field ================= */
+  function starFrom(ta) {
+    if (!cur || !cur.meta || !ta) return;
+    var a = ta.selectionStart, b = ta.selectionEnd;
+    var t = (typeof a === 'number' && b > a) ? ta.value.slice(a, b) : '';
+    t = t.replace(/\s+/g, ' ').trim();
+    if (!t) { toast('حدّد جملة من الجواب أول، بعدين اضغط الزر'); return; }
+    var g = cur.meta.general || '';
+    if (g.indexOf(t) !== -1) { toast('هذي الفائدة موجودة من قبل'); return; }
+    cur.meta.general = (g.trim() ? g.replace(/\s+$/, '') + '\n' : '') + '- ' + t;
+    writeMeta('general', 0);
+    paintMeta();
+    toast('انضافت لفوائد الجلسة');
+  }
+  // keep the textarea selection when the star button is pressed
+  document.addEventListener('mousedown', function (e) { if (e.target.closest && e.target.closest('[data-act=star], #fStar')) e.preventDefault(); });
+
+  /* ================= FOCUS MODE: one question at a time, big ================= */
+  var focus = null;
+  function focusIds() { var by = sortedQs(); return by.core.concat(by.ask, by.spare); }
+  function openFocus() {
+    if (!cur || !cur.loaded) return;
+    var ids = focusIds();
+    if (!ids.length) { toast('ما فيه أسئلة بعد'); return; }
+    var i = ids.findIndex(function (id) { return cur.qs[id].group === 'core' && !cur.qs[id].asked; });
+    if (i < 0) i = ids.findIndex(function (id) { return !cur.qs[id].asked; });
+    if (i < 0) i = 0;
+    focus = { ids: ids, i: i };
+    var ov = document.createElement('div');
+    ov.className = 'focus-ov'; ov.id = 'focusOv';
+    ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'وضع المجلس');
+    ov.innerHTML =
+      '<div class="f-top"><span class="f-count" id="fCount"></span><span class="timer-pill" id="fTimer" hidden></span>' +
+      '<button class="btn ghost" type="button" id="fClose">إغلاق</button></div>' +
+      '<div class="f-body"><span class="f-group" id="fGroup"></span><p class="f-q" id="fQ"></p><p class="f-why" id="fWhy" hidden></p>' +
+      '<label class="lbl" for="fAns">جواب الشيخ</label><textarea class="f-ans" id="fAns" placeholder="اكتب خلاصة جوابه هنا"></textarea>' +
+      '<div class="ans-tools"><button class="icon-btn star-btn" type="button" id="fStar">أضف المحدد للفوائد</button></div></div>' +
+      '<div class="f-nav"><button class="btn" type="button" id="fPrev">السابق</button><button class="btn" type="button" id="fSkip">تخطّي</button>' +
+      '<button class="btn primary" type="button" id="fDone"></button></div>';
+    document.body.appendChild(ov);
+    document.documentElement.classList.add('no-scroll');
+    var ans = document.getElementById('fAns');
+    ans.addEventListener('input', function () {
+      var id = focus && focus.ids[focus.i]; if (!id || !cur.qs[id]) return;
+      cur.qs[id].answer = ans.value; writeAnswer(id, 900);
+    });
+    ans.addEventListener('blur', function () { var id = focus && focus.ids[focus.i]; if (!id) return; var k = 'a/' + cur.sid + '/' + id; if (WQ[k] && WQ[k].timer) run(k); });
+    document.getElementById('fStar').addEventListener('click', function () { starFrom(ans); });
+    document.getElementById('fClose').addEventListener('click', function () { closeFocus(); });
+    document.getElementById('fPrev').addEventListener('click', function () { moveFocus(-1); });
+    document.getElementById('fSkip').addEventListener('click', function () { moveFocus(1); });
+    document.getElementById('fDone').addEventListener('click', function () {
+      var id = focus.ids[focus.i], q = cur.qs[id];
+      if (q && !q.asked) { q.asked = true; writeQ(id, 'k', { asked: true }); }
+      if (focus.i >= focus.ids.length - 1) { closeFocus(); toast('خلّصت كل الأسئلة'); return; }
+      moveFocus(1);
+    });
+    ov.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeFocus(); });
+    if ('wakeLock' in navigator && !wake.lock) { wake.want = true; wake.acquire().catch(function () { wake.want = false; }); }
+    paintFocus();
+    document.getElementById('fDone').focus();
+  }
+  function moveFocus(d) {
+    if (!focus) return;
+    flushFocusAnswer();
+    focus.i = Math.max(0, Math.min(focus.ids.length - 1, focus.i + d));
+    paintFocus();
+  }
+  function flushFocusAnswer() { var id = focus && focus.ids[focus.i]; if (!id || !cur) return; var k = 'a/' + cur.sid + '/' + id; if (WQ[k] && WQ[k].timer) run(k); }
+  function paintFocus() {
+    if (!focus || !cur) return;
+    focus.ids = focus.ids.filter(function (id) { return !!cur.qs[id]; });
+    if (!focus.ids.length) { closeFocus(); return; }
+    if (focus.i >= focus.ids.length) focus.i = focus.ids.length - 1;
+    var id = focus.ids[focus.i], q = cur.qs[id], n = focus.ids.length;
+    document.getElementById('fCount').textContent = 'السؤال ' + ar(focus.i + 1) + ' من ' + ar(n);
+    document.getElementById('fGroup').textContent = GLABEL[q.group] || '';
+    document.getElementById('fQ').textContent = q.text || '';
+    var why = document.getElementById('fWhy'); why.textContent = q.why || ''; why.hidden = !q.why;
+    var ans = document.getElementById('fAns'); if (ans.value !== (q.answer || '')) ans.value = q.answer || '';
+    document.getElementById('fPrev').disabled = focus.i === 0;
+    document.getElementById('fSkip').disabled = focus.i >= n - 1;
+    var last = focus.i >= n - 1;
+    document.getElementById('fDone').textContent = q.asked ? (last ? 'إنهاء' : 'التالي') : (last ? 'سألته، وخلّصت' : 'سألته، التالي');
+    document.getElementById('focusOv').classList.toggle('asked', !!q.asked);
+    paintTimer();
+  }
+  function closeFocus(silent) {
+    var ov = document.getElementById('focusOv');
+    if (!ov) { focus = null; return; }
+    flushFocusAnswer();
+    ov.remove(); focus = null;
+    document.documentElement.classList.remove('no-scroll');
+    if (!silent && cur && cur.loaded) renderQuestions();
   }
 
   function paintWake() {
