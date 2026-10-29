@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
-import { fail, handle, requireUser } from "@/lib/auth";
+import { cleanUsername, fail, handle, requireUser } from "@/lib/auth";
 import { dailyLimit } from "@/lib/limits";
 import { intlPhone, saveWa, smartLogin, waCfg, waSend } from "@/lib/wa";
 export const dynamic = "force-dynamic";
@@ -46,6 +46,17 @@ export async function POST(req: Request) {
       if (!u) fail("ما لقيت المستخدم", 404);
       if (u!.role === "admin") fail("حساب المدير ما يحتاج موافقة");
       await prisma.user.update({ where: { id: u!.id }, data: { approved: !!b.approved } });
+      return { ok: true };
+    }
+    if (b.op === "createUser") {
+      const name = String(b.name ?? "").trim().slice(0, 60);
+      const username = cleanUsername(b.username);
+      const pw = String(b.password ?? "");
+      if (!name) fail("اكتب الاسم");
+      if (!/^[a-z0-9_.]{3,30}$/.test(username)) fail("اسم المستخدم: حروف إنجليزية صغيرة أو أرقام، من ٣ أحرف أو أكثر");
+      if (pw.length < 8) fail("كلمة المرور لازم تكون ٨ أحرف أو أكثر");
+      if (await prisma.user.findUnique({ where: { username } })) fail("اسم المستخدم مأخوذ، اختر غيره");
+      await prisma.user.create({ data: { name, username, approved: true, aiAllowed: !!b.ai, passwordHash: await bcrypt.hash(pw, 10) } });
       return { ok: true };
     }
     if (b.op === "setPassword") {

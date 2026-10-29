@@ -180,6 +180,7 @@
   window.addEventListener('hashchange', function () {
     if (!me && shareTokenFromHash()) { renderShare(shareTokenFromHash()); return; }
     if (!me && view === 'share') { view = null; boot(); return; }
+    if (!me && view === 'login' && location.hash === '#register') { renderAuth('register'); return; }
     route();
   });
   function leaveSession() { closeFocus(true); endSel(); if (!cur) return; flushAll(); cur = null; }
@@ -188,7 +189,7 @@
   function showLogin() {
     if (view === 'login') return;
     leaveSession(); view = 'login'; me = null;
-    renderAuth('login');
+    renderAuth(location.hash === '#register' ? 'register' : 'login');
     fetch('/api/setup', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
       if (view !== 'login') return;
       if (j && j.db === false) { app.innerHTML = '<div class="wrap"><p class="boot">قاعدة البيانات غير مربوطة بعد. من Vercel: Storage ← Neon، ثم Redeploy.</p></div>'; return; }
@@ -227,7 +228,7 @@
             if (setup && x.status === 409) { renderAuth('login'); return; }
             err.textContent = x.j.error || 'تعذّر الدخول'; return;
           }
-          if (reg && x.j.pending) { renderPending(); return; }
+          if (reg && x.j.pending) { if (location.hash === '#register') history.replaceState(null, '', location.pathname); renderPending(); return; }
           view = null; boot();
         }, function () { btn.disabled = false; err.textContent = 'ما فيه اتصال، جرّب مرة ثانية.'; });
     });
@@ -651,6 +652,76 @@
     a.href = url; a.download = name; document.body.appendChild(a); a.click();
     setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 4000);
   }
+  /* ---------- real .docx (zip + WordprocessingML), right-to-left, no library ---------- */
+  var CRC_T = null;
+  function crc32(u8) {
+    if (!CRC_T) { CRC_T = []; for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; CRC_T[n] = c >>> 0; } }
+    var crc = 0xFFFFFFFF; for (var i = 0; i < u8.length; i++) crc = CRC_T[(crc ^ u8[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  function zipStore(files) {
+    var enc = new TextEncoder(), parts = [], central = [], offset = 0;
+    function u16(v) { return [v & 255, (v >>> 8) & 255]; }
+    function u32(v) { return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]; }
+    files.forEach(function (f) {
+      var name = enc.encode(f.name), data = enc.encode(f.data), crc = crc32(data);
+      var head = [].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0x21), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0));
+      parts.push(new Uint8Array(head), name, data);
+      central.push(new Uint8Array([].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0x21), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+      offset += head.length + name.length + data.length;
+    });
+    var cdSize = central.reduce(function (a, b) { return a + b.length; }, 0);
+    var end = new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(cdSize), u32(offset), u16(0)));
+    return new Blob(parts.concat(central, [end]), { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  }
+  function xmlEsc(t) { return String(t == null ? '' : t).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function wP(t, o) {
+    o = o || {};
+    var sz = o.size || 28;
+    var ppr = '<w:pPr>' + (o.pageBreak ? '<w:pageBreakBefore/>' : '') + '<w:bidi/><w:spacing w:before="' + (o.before || 0) + '" w:after="' + (o.after == null ? 100 : o.after) + '"/>' + (o.ind ? '<w:ind w:right="' + o.ind + '"/>' : '') + '</w:pPr>';
+    var rpr = '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Traditional Arabic"/>' + (o.bold ? '<w:b/><w:bCs/>' : '') + (o.color ? '<w:color w:val="' + o.color + '"/>' : '') + '<w:sz w:val="' + sz + '"/><w:szCs w:val="' + sz + '"/><w:rtl/></w:rPr>';
+    return '<w:p>' + ppr + '<w:r>' + rpr + '<w:t xml:space="preserve">' + xmlEsc(t) + '</w:t></w:r></w:p>';
+  }
+  function wLines(t) {
+    return String(t || '').split(/\r?\n/).map(function (l) {
+      var m = l.match(/^\s*[-•]\s+(.*)$/);
+      if (m) return wP('• ' + m[1], { ind: 360 });
+      return l.trim() ? wP(l) : '';
+    }).join('');
+  }
+  function docxBody(m, first) {
+    var d = fmtDate(str(m.date)), x = '';
+    x += wP('مجلس مع ' + (m.sheikh || 'الشيخ'), { size: 44, bold: true, after: 60, pageBreak: !first });
+    var meta = [m.topic ? 'الموضوع: ' + m.topic : '', d.g ? 'التاريخ: ' + d.g + (d.h ? ' (' + d.h + ')' : '') : '', m.place ? 'المكان: ' + m.place : ''].filter(Boolean).join(' · ');
+    if (meta) x += wP(meta, { size: 24, color: '555555', after: 200 });
+    var qs = m.questions || [];
+    if (qs.length) {
+      x += wP('الأسئلة والأجوبة', { size: 32, bold: true, color: '1D6A56', before: 200 });
+      qs.forEach(function (q, i) {
+        x += wP(ar(i + 1) + '. ' + (q.text || ''), { bold: true, before: 160, after: 60 });
+        x += str(q.answer).trim() ? wLines(q.answer) : wP('لم يُكتب جواب.', { color: '888888' });
+      });
+    }
+    if (str(m.general).trim()) x += wP('فوائد وأفكار للتطبيق', { size: 32, bold: true, color: '1D6A56', before: 240 }) + wLines(m.general);
+    if (str(m.books).trim()) x += wP('كتب وآثار ذكرها الشيخ', { size: 32, bold: true, color: '1D6A56', before: 240 }) + wLines(m.books);
+    return x;
+  }
+  function downloadDocx(name, recs) {
+    var W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    var doc = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="' + W + '"><w:body>' +
+      recs.map(function (m, i) { return docxBody(m, i === 0); }).join('') +
+      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/><w:bidi/></w:sectPr></w:body></w:document>';
+    var blob = zipStore([
+      { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>' },
+      { name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>' },
+      { name: 'word/document.xml', data: doc }
+    ]);
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 4000);
+    toast('جاري تنزيل ملف Word');
+  }
+
   function printRecords(recs) {
     var old = document.getElementById('printArea'); if (old) old.remove();
     var el = document.createElement('div'); el.id = 'printArea'; el.dir = 'rtl';
@@ -668,7 +739,7 @@
       btn.disabled = false; btn.textContent = label;
       var today = new Date().toISOString().slice(0, 10);
       if (kind === 'json') download('majalis-backup-' + today + '.json', JSON.stringify({ app: 'majalis', exportedAt: new Date().toISOString(), majalis: rows }, null, 1), 'application/json');
-      else download('majalis-' + today + '.doc', docHtml(rows.slice().sort(function (a, b) { return str(a.date) < str(b.date) ? -1 : 1; })), 'application/msword');
+      else downloadDocx('majalis-' + today + '.docx', rows.slice().sort(function (a, b) { return str(a.date) < str(b.date) ? -1 : 1; }));
     }, function (e) { btn.disabled = false; btn.textContent = label; toast(e.message); });
   }
 
@@ -683,6 +754,18 @@
       '<main class="home-main wrap">' +
       '<form class="limit-row" id="limitForm"><label for="lim">حد الجلسات بالذكاء الاصطناعي لكل مستخدم في اليوم</label>' +
       '<input class="input" id="lim" type="number" min="0" max="50" inputmode="numeric" style="max-width:110px"><button class="btn" type="submit">حفظ</button><span class="hint" id="limMsg"></span></form>' +
+      '<section class="wa-card" aria-labelledby="inv-h"><h2 id="inv-h">رابط التسجيل</h2>' +
+      '<p class="lede">انسخه وانشره للي يبي يسجّل. يفتح له صفحة إنشاء حساب على طول، وحسابه ينتظر موافقتك.</p>' +
+      '<input class="input" id="invLink" readonly dir="ltr" value="' + esc(location.origin + location.pathname + '#register') + '">' +
+      '<div class="btns"><button class="btn primary" type="button" id="invCopy">نسخ الرابط</button>' +
+      '<a class="btn" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent('سجّل في دفتر مجالس المشايخ من هذا الرابط:\n' + location.origin + location.pathname + '#register') + '">إرسال واتساب</a></div></section>' +
+      '<section class="wa-card" aria-labelledby="nu-h"><h2 id="nu-h">إنشاء حساب</h2><p class="lede">تسوي حساب لأحد بنفسك، ويقدر يدخل على طول بدون موافقة.</p>' +
+      '<form class="wa-form" id="newUser" autocomplete="off"><div class="new-grid">' +
+      '<div class="field"><label for="nu-n">الاسم</label><input class="input" id="nu-n"></div>' +
+      '<div class="field"><label for="nu-u">اسم المستخدم</label><input class="input" id="nu-u" dir="ltr" autocapitalize="none" placeholder="حروف إنجليزية صغيرة"></div>' +
+      '<div class="field"><label for="nu-p">كلمة المرور</label><input class="input" id="nu-p" dir="ltr" placeholder="٨ أحرف أو أكثر"></div></div>' +
+      '<label class="asked"><input type="checkbox" id="nu-ai"><span>يقدر يستخدم الذكاء الاصطناعي</span></label>' +
+      '<div class="btns"><button class="btn primary" type="submit">إنشاء الحساب</button></div></form></section>' +
       '<section class="wa-card" aria-labelledby="wa-h"><div class="sec-head"><h2 id="wa-h">إشعارات واتساب</h2><span class="chip" id="waState"></span></div>' +
       '<p class="lede">يوصلك على واتساب كل طلب تسجيل جديد، وتذكير قبل مجالسك بيوم. الإرسال من رقمك المربوط في «الواتس الذكي»، نفس موقع التسميع.</p>' +
       '<div id="waBody"><p class="hint">جاري التحميل</p></div></section>' +
@@ -690,6 +773,21 @@
       '<div class="list" id="users"><p class="empty">جاري التحميل</p></div></main>';
     document.getElementById('selUsers').addEventListener('click', function () { startSel('users'); });
     loadWa();
+    document.getElementById('invCopy').addEventListener('click', function () {
+      var inp = document.getElementById('invLink');
+      function fb() { inp.focus(); inp.select(); toast('حدّد الرابط وانسخه'); }
+      try { navigator.clipboard.writeText(inp.value).then(function () { toast('انتسخ رابط التسجيل'); }, fb); } catch (e) { fb(); }
+    });
+    document.getElementById('newUser').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var f = e.target, btn = f.querySelector('button[type=submit]');
+      var body = { op: 'createUser', name: document.getElementById('nu-n').value, username: document.getElementById('nu-u').value, password: document.getElementById('nu-p').value, ai: document.getElementById('nu-ai').checked };
+      btn.disabled = true;
+      api('/api/admin', body).then(function () {
+        btn.disabled = false; toast('انشأ الحساب. أرسل له اسم المستخدم وكلمة المرور.');
+        f.reset(); loadUsers();
+      }, function (er) { btn.disabled = false; toast(er.message); });
+    });
     document.getElementById('limitForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var n = Number(document.getElementById('lim').value);
@@ -1187,7 +1285,7 @@
     }
     wire(document.getElementById('copyAll'), true);
     wire(document.getElementById('copyQ'), false);
-    document.getElementById('dlDoc').addEventListener('click', function () { if (cur && cur.meta) download(fileName(curAsRecord()) + '.doc', docHtml([curAsRecord()]), 'application/msword'); });
+    document.getElementById('dlDoc').addEventListener('click', function () { if (cur && cur.meta) downloadDocx(fileName(curAsRecord()) + '.docx', [curAsRecord()]); });
     document.getElementById('printBtn').addEventListener('click', function () { if (cur && cur.meta) printRecords([curAsRecord()]); });
     var aiTools = document.getElementById('aiTools');
     if (aiTools) aiTools.addEventListener('click', function (e) { var b = e.target.closest('[data-ai-tool]'); if (b) runTool(b.dataset.aiTool, b); });
