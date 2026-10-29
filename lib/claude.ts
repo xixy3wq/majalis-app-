@@ -109,11 +109,21 @@ export async function streamClaude(opts: { system: any; messages: Msg[]; maxToke
   });
 }
 
+/** المخطط بالشكل المطلوب للردود المنظمة: كل كائن additionalProperties = false */
+function strict(schema: any): any {
+  if (Array.isArray(schema)) return schema.map(strict);
+  if (!schema || typeof schema !== "object") return schema;
+  const out: any = {};
+  for (const [k, v] of Object.entries(schema)) out[k] = k === "properties" ? Object.fromEntries(Object.entries(v as any).map(([pk, pv]) => [pk, strict(pv)])) : strict(v);
+  if (out.type === "object") out.additionalProperties = false;
+  return out;
+}
+
 /**
- * رد منظم مضمون: نجبر Claude يرجّع النتيجة عبر «أداة» لها مخطط JSON، فيرجع كائن صالح دائمًا
- * (بدل نص JSON ممكن ينكسر بعلامة تنصيص أو ينقطع).
+ * رد منظم مضمون (Structured outputs): Claude يرجّع JSON مطابق للمخطط دائمًا،
+ * بدل نص JSON ممكن ينكسر بعلامة تنصيص أو ينقطع.
  */
-export async function askClaudeJson<T = any>(opts: { system: string; prompt: string; name: string; schema: any; maxTokens?: number; deadlineMs?: number }): Promise<T> {
+export async function askClaudeJson<T = any>(opts: { system: string; prompt: string; name?: string; schema: any; maxTokens?: number; deadlineMs?: number }): Promise<T> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) fail("الذكاء الاصطناعي غير مفعّل: صاحب الموقع لازم يضيف مفتاح Claude API", 503);
   const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -122,15 +132,15 @@ export async function askClaudeJson<T = any>(opts: { system: string; prompt: str
     body: JSON.stringify({
       model: MODEL(), max_tokens: opts.maxTokens || 12000, system: opts.system,
       messages: [{ role: "user", content: opts.prompt }],
-      tools: [{ name: opts.name, description: "احفظ النتيجة النهائية بهذا الشكل.", input_schema: opts.schema }],
-      tool_choice: { type: "tool", name: opts.name },
+      output_config: { format: { type: "json_schema", schema: strict(opts.schema) } },
     }),
     signal: AbortSignal.timeout(opts.deadlineMs || 280000),
   }).catch((e) => fail(e?.name === "TimeoutError" ? "أخذ الرد وقت أطول من المتوقع، جرّب مرة ثانية" : "ما قدرت أتصل بـ Claude، جرّب بعد شوي", 502));
   const d: any = await (r as Response).json().catch(() => ({}));
   if (!(r as Response).ok) apiError((r as Response).status, String(d?.error?.message || ""));
   if (d.stop_reason === "max_tokens") fail("الرد طلع أطول من المسموح وانقطع، جرّب مرة ثانية", 502);
-  const block = (d.content || []).find((c: any) => c.type === "tool_use" && c.name === opts.name);
-  if (!block || typeof block.input !== "object") fail("ما رجع الذكاء الاصطناعي نتيجة مرتبة، جرّب مرة ثانية", 502);
-  return block.input as T;
+  if (d.stop_reason === "refusal") fail("الذكاء الاصطناعي اعتذر عن هذا الطلب", 502);
+  const text = (d.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
+  try { return JSON.parse(text) as T; } catch { fail("ما رجع الذكاء الاصطناعي نتيجة مرتبة، جرّب مرة ثانية", 502); }
+  return {} as T;
 }

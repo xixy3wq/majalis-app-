@@ -138,7 +138,7 @@ ${DIALECT}
 - «من هو»: من ٣ إلى ٦ نقاط قصيرة من السيرة.
 - إذا فيه تشابه أسماء أو المعلومات قليلة، اكتب ذلك في caution.
 ${STYLE_TRAIT}
-احفظ النتيجة بأداة الحفظ بهذا الشكل:
+أعد النتيجة بهذا الشكل:
 {"who": ["نقطة"], "traits": [{"title": "عنوان قصير", "evidence": "الدليل", "meaning": "وش يعني لك"}], "caution": ""}`;
 
 export function briefPrompt(r: Research, topic: string, about: string) {
@@ -173,7 +173,7 @@ ${DIALECT}
 - during وavoid: نصائح عملية مبنية على تحليل شخصيته، مو نصائح عامة.
 - closing: كيف يختم المجلس بطريقة تناسب هذا الشيخ (جملة ختام أو طلب أخير)، بدون تكرار سؤال ask.
 ${STYLE_Q}
-احفظ النتيجة بأداة الحفظ بهذا الشكل:
+أعد النتيجة بهذا الشكل:
 {"angle": "...", "hook": "...", "opening": ["خطوة"], "bridge": "...", "before": ["..."], "during": ["..."], "avoid": ["..."], "closing": "...", "questions": [{"text": "...", "why": "...", "group": "core"}]}`;
 
 export function planPrompt(r: Research, b: Brief, topic: string, about: string) {

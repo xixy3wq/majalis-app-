@@ -65,7 +65,7 @@ const SUM_RULES =
   "7. summary: خلاصة المجلس في 3 إلى 6 أسطر، كل سطر يبدأ بـ «- ».\n" +
   "8. لا تكرر نفس المعلومة في أكثر من مكان، واختصر بدون ما تضيّع المعنى.\n" +
   STYLE + "\n" +
-  'احفظ النتيجة بأداة الحفظ بهذا الشكل: {"sheikh":"B","summary":"- …","answers":[{"qid":"…","answer":"- …","at":"12:30"}],"extra":[{"q":"…","answer":"- …","at":"…"}],"guidance":["…"],"books":["…"]}';
+  'أعد النتيجة بهذا الشكل: {"sheikh":"B","summary":"- …","answers":[{"qid":"…","answer":"- …","at":"12:30"}],"extra":[{"q":"…","answer":"- …","at":"…"}],"guidance":["…"],"books":["…"]}';
 
 const STR = { type: "string" };
 const SUM_SCHEMA = {
