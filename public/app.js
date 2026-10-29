@@ -2191,7 +2191,7 @@
     return api('/api/rec', { op: 'prepare', majlisId: sid, size: blob.size }).then(function (p) {
       return blobLib().then(function (lib) {
         var type = String(blob.type || '').split(';')[0];
-        return lib.upload(p.prefix + info.file, blob, {
+        return lib[p.mode === 'presigned' && lib.uploadPresigned ? 'uploadPresigned' : 'upload'](p.prefix + info.file, blob, {
           access: p.access || 'private', handleUploadUrl: '/api/upload',
           clientPayload: JSON.stringify({ kind: 'rec', majlisId: sid, size: blob.size }),
           multipart: blob.size > 8 * 1024 * 1024, contentType: type || undefined,
@@ -2644,7 +2644,7 @@
       var msg = document.getElementById('bkMsg'); msg.textContent = 'يرفع الملف…';
       api('/api/rec', { op: 'prepare', kind: 'backup', size: f.size }).then(function (p) {
         return blobLib().then(function (lib) {
-          return lib.upload(p.prefix + 'majalis-upload-' + stampName() + (/\.gz$/i.test(f.name) ? '.json.gz' : '.json'), f, { access: p.access || 'private', handleUploadUrl: '/api/upload', clientPayload: JSON.stringify({ kind: 'backup', size: f.size }), contentType: /\.gz$/i.test(f.name) ? 'application/gzip' : 'application/json' });
+          return lib[p.mode === 'presigned' && lib.uploadPresigned ? 'uploadPresigned' : 'upload'](p.prefix + 'majalis-upload-' + stampName() + (/\.gz$/i.test(f.name) ? '.json.gz' : '.json'), f, { access: p.access || 'private', handleUploadUrl: '/api/upload', clientPayload: JSON.stringify({ kind: 'backup', size: f.size }), contentType: /\.gz$/i.test(f.name) ? 'application/gzip' : 'application/json' });
         });
       }).then(function (res) {
         msg.innerHTML = '';

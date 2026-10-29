@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { fail, handle, requireUser, text } from "@/lib/auth";
 import { aiReady, askClaude } from "@/lib/claude";
 import { extractJson } from "@/lib/gen";
-import { blobAccess, blobReady, delFiles, readUrl, rememberAccess, SAFE_LIMIT, storageUsed } from "@/lib/blob";
+import { blobAccess, blobReady, delFiles, readUrl, rememberAccess, SAFE_LIMIT, storageUsed, uploadMode } from "@/lib/blob";
 import { asrReady, deleteAsr, pollAsr, startAsr } from "@/lib/asr";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -102,10 +102,10 @@ export async function POST(req: Request) {
       if (size > r.left) fail(me.role === "admin" ? "مساحة التخزين قربت تخلص. احذف تسجيلات قديمة بعد ما تفرّغها" : "وصلت حدك من مساحة التسجيلات. احذف تسجيلات قديمة بعد ما تفرّغها", 413);
       if (b.kind === "backup") {
         if (me.role !== "admin") fail("للمدير فقط", 403);
-        return { prefix: "backups/upload/", access: await blobAccess() };
+        return { prefix: "backups/upload/", access: await blobAccess(), mode: uploadMode() };
       }
       const m = await ownMajlis(me.id, b.majlisId);
-      return { prefix: `rec/${me.id}/${m.id}/`, access: await blobAccess() };
+      return { prefix: `rec/${me.id}/${m.id}/`, access: await blobAccess(), mode: uploadMode() };
     }
 
     if (op === "add") {

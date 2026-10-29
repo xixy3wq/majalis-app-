@@ -12,7 +12,10 @@ export type Access = "private" | "public";
     if (typeof v === "string" && v.startsWith("vercel_blob_rw_")) { process.env.BLOB_READ_WRITE_TOKEN = v; return; }
   }
 })();
-export const blobReady = () => !!process.env.BLOB_READ_WRITE_TOKEN;
+/** المخزن مربوط: إما بالطريقة الجديدة (OIDC: BLOB_STORE_ID) أو بمفتاح ثابت */
+export const blobReady = () => !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+/** طريقة الرفع من المتصفح: الجديدة (رابط موقّع) تكفيها OIDC، والقديمة تحتاج المفتاح الثابت */
+export const uploadMode = () => (process.env.BLOB_READ_WRITE_TOKEN ? "token" : "presigned");
 /** أسماء متغيرات المخزن الموجودة (الأسماء فقط بدون القيم) للمساعدة في معرفة سبب عدم التفعيل */
 export const blobEnvNames = () => Object.keys(process.env).filter((k) => /BLOB|STORE_ID/i.test(k)).sort();
 /** سعة الخطة المجانية في Vercel (Hobby): ١ جيجا. إذا تعداها يقفل المخزن ٣٠ يوم، فنوقف قبلها. */
