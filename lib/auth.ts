@@ -20,7 +20,7 @@ export async function requireUser() {
 }
 export function handle(fn: () => Promise<unknown>) {
   return fn().then(
-    (r) => NextResponse.json(r ?? { ok: true }),
+    (r) => (r instanceof Response ? r : NextResponse.json(r ?? { ok: true })),
     (e) => {
       if (e instanceof ApiError) return NextResponse.json({ error: e.message }, { status: e.status });
       console.error(e);

@@ -19,7 +19,7 @@ export async function GET() {
     asked.forEach((a) => { am[a.majlisId] = a._count._all; });
     const pending = me.role === "admin" ? await prisma.user.count({ where: { approved: false, role: { not: "admin" } } }) : 0;
     return {
-      me: { name: me.name, role: me.role, about: me.about },
+      me: { id: me.id, name: me.name, role: me.role, about: me.about },
       pending,
       ai: { ready: aiReady(), allowed: me.role === "admin" || me.aiAllowed, admin: me.role === "admin", limit: me.role === "admin" ? null : await dailyLimit(), used: await usedToday(me.id) },
       majalis: list.map((m) => ({ id: m.id, sheikh: m.sheikh, topic: m.topic, date: m.date, place: m.place, createdAt: m.createdAt.getTime(), qCount: m._count.questions, askedCount: am[m.id] || 0 })),

@@ -175,6 +175,7 @@
     else if (h === 'sheikhs') openSheikhs();
     else if (h.indexOf('sh-') === 0) openSheikh(h.slice(3));
     else if (h === 'library') openLibrary();
+    else if (h === 'chat') openChat();
     else openHome();
   }
   window.addEventListener('hashchange', function () {
@@ -437,6 +438,7 @@
   /* ================= TABS between notebook views ================= */
   function tabsHtml(on) {
     var T = [['home', '#', 'الجلسات'], ['sheikhs', '#sheikhs', 'المشايخ'], ['library', '#library', 'المكتبة']];
+    if (aiOk()) T.push(['chat', '#chat', 'سولف مع دفترك']);
     return '<nav class="home-tabs" aria-label="أقسام الدفتر">' + T.map(function (t) {
       return '<a href="' + t[1] + '"' + (t[0] === on ? ' class="on" aria-current="page"' : '') + '>' + t[2] + '</a>';
     }).join('') + '</nav>';
@@ -1365,25 +1367,182 @@
       return '<a class="ref" href="#s-' + id + (k === 'q' && qid ? '~' + qid : '') + '">' + esc(label) + '</a>';
     });
   }
+  var CHAT_SUGGEST = ['كم مجلس حضرت، ومع مين أكثر؟', 'وش أفضل فائدة مرت علي؟ وليش؟', 'لخّص لي أهم توجيهات المشايخ', 'وش الأسئلة اللي ما كتبت جوابها؟', 'وش تنصحني أركز عليه في المجلس الجاي؟'];
+  function suggestHtml() {
+    return '<div class="chat-sugg" role="list">' + CHAT_SUGGEST.map(function (t) { return '<button class="sugg" type="button" role="listitem" data-sugg="' + esc(t) + '">' + esc(t) + '</button>'; }).join('') + '</div>';
+  }
   function askHtml() {
     if (!aiOk()) return '';
-    return '<section class="ask-card" aria-labelledby="ask-h"><h2 id="ask-h">اسأل دفترك</h2>' +
-      '<p class="lede">اسأل عن أي شيء كتبته في جلساتك، مثل: «وين قال الشيخ إن التكرار أساس الحفظ؟» أو «وش قال المشايخ عن التدبر؟»</p>' +
-      '<form id="askForm" class="ask-form" autocomplete="off"><label class="lbl" for="askQ" hidden>سؤالك</label><input class="input" id="askQ" placeholder="اكتب سؤالك"><button class="btn primary" type="submit">اسأل</button></form>' +
-      '<div class="ai-out" id="askOut" hidden></div></section>';
+    return '<section class="ask-card" aria-labelledby="ask-h"><h2 id="ask-h">سولف مع دفترك</h2>' +
+      '<p class="lede">يعرف كل جلساتك. اسأله كم مجلس حضرت، أو وين قال الشيخ فائدة معيّنة، أو اطلب رأيه في أفضل فائدة.</p>' +
+      '<form id="askForm" class="ask-form" autocomplete="off"><label class="lbl" for="askQ" hidden>رسالتك</label><input class="input" id="askQ" placeholder="اكتب رسالتك"><button class="btn primary" type="submit">أرسل</button></form>' +
+      suggestHtml() + '</section>';
   }
   function wireAsk() {
     var f = document.getElementById('askForm'); if (!f) return;
+    function go(q) { chatPending = q; location.hash = 'chat'; }
     f.addEventListener('submit', function (e) {
       e.preventDefault();
-      var q = document.getElementById('askQ').value.trim(), out = document.getElementById('askOut'), btn = f.querySelector('button');
-      if (q.length < 3) { toast('اكتب سؤالك'); return; }
-      out.hidden = false; out.innerHTML = '<p class="hint">يدوّر في جلساتك…</p>'; btn.disabled = true;
-      api('/api/assist', { op: 'ask', question: q }).then(function (j) {
-        btn.disabled = false;
-        out.innerHTML = '<div class="rich">' + renderRefs(md(j.answer), j.refs) + '</div><p class="hint">الروابط تفتح الجلسة والسؤال اللي جاءت منه المعلومة.</p>';
-      }, function (er) { btn.disabled = false; out.innerHTML = '<p class="login-err">' + esc(er.message) + '</p>'; });
+      var q = document.getElementById('askQ').value.trim();
+      if (q.length < 2) { toast('اكتب رسالتك'); return; }
+      go(q);
     });
+    f.parentNode.querySelectorAll('[data-sugg]').forEach(function (b) { b.addEventListener('click', function () { go(b.dataset.sugg); }); });
+  }
+
+  /* ================= CHAT with the notebook ================= */
+  var chat = { msgs: null, busy: false, ctl: null, uid: null }, chatPending = null;
+  function chatKey() { return 'majalis-chat-v1:' + ((me && me.id) || ''); }
+  function chatLoad() {
+    if (chat.msgs && chat.uid === (me && me.id)) return;
+    chat.uid = me && me.id; chat.msgs = [];
+    try { var x = JSON.parse(localStorage.getItem(chatKey()) || '[]'); if (Array.isArray(x)) chat.msgs = x.filter(function (m) { return m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'; }); } catch (e) {}
+  }
+  function chatSave() {
+    try { localStorage.setItem(chatKey(), JSON.stringify(chat.msgs.slice(-40).map(function (m) { return { role: m.role, content: m.content, error: m.error || '', stopped: !!m.stopped }; }))); } catch (e) {}
+  }
+  function chatRefs() {
+    var r = {};
+    (list || []).forEach(function (m) {
+      var n = String(m.sheikh || '').replace(/^\s*(فضيلة\s+)?(الشيخ|الدكتور|د\.)\s*/, '').trim() || 'الجلسة', d = fmtDate(str(m.date)).g;
+      r[m.id] = n + (d ? ' · ' + d : '');
+    });
+    return r;
+  }
+  function chatBody(m, live) {
+    var t = String(m.content || '');
+    if (live) t = t.replace(/\[\[[^\]]*\]?$/, '');
+    var html = renderRefs(md(t), chatRefs()).replace(/\[\[[^\]]*\]\]/g, '');
+    return html;
+  }
+  function msgHtml(m, i) {
+    if (m.role === 'user') return '<div class="msg me" data-i="' + i + '"><div class="bubble">' + esc(m.content).replace(/\n/g, '<br>') + '</div></div>';
+    var live = chat.busy && i === chat.msgs.length - 1;
+    var body = m.content ? '<div class="rich">' + chatBody(m, live) + '</div>' : (live ? '<p class="typing" aria-label="يكتب"><span></span><span></span><span></span></p>' : '');
+    var foot = '';
+    if (m.error) foot = '<p class="login-err">' + esc(m.error) + '</p><div class="btns"><button class="btn" type="button" data-chat="retry">أعد المحاولة</button></div>';
+    else if (m.stopped) foot = '<p class="hint">وقّفت الرد.</p>';
+    else if (!live && m.content) foot = '<div class="msg-tools"><button class="linkish" type="button" data-chat="copy" data-i="' + i + '">نسخ</button></div>';
+    return '<div class="msg bot" data-i="' + i + '">' + body + foot + '</div>';
+  }
+  function paintChat() {
+    var th = document.getElementById('chatThread'); if (!th || view !== 'chat') return;
+    th.innerHTML = chat.msgs.length ? chat.msgs.map(msgHtml).join('') :
+      '<div class="chat-empty"><p class="lede">ابدأ بأي سؤال، أو اختر واحد من هذي:</p>' + suggestHtml() + '</div>';
+    th.querySelectorAll('[data-sugg]').forEach(function (b) { b.addEventListener('click', function () { sendChat(b.dataset.sugg); }); });
+    var nb = document.getElementById('chatNew'); if (nb) nb.hidden = !chat.msgs.length;
+    paintComposer();
+  }
+  var paintRaf = 0;
+  function paintLast() {
+    if (paintRaf) return;
+    paintRaf = requestAnimationFrame(function () {
+      paintRaf = 0;
+      var th = document.getElementById('chatThread'); if (!th || view !== 'chat') return;
+      var i = chat.msgs.length - 1, el = th.querySelector('.msg[data-i="' + i + '"]');
+      var stick = nearBottom();
+      if (el) el.outerHTML = msgHtml(chat.msgs[i], i); else { paintChat(); }
+      if (stick) scrollChatEnd();
+    });
+  }
+  function nearBottom() { return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 160; }
+  function scrollChatEnd() { window.scrollTo(0, document.documentElement.scrollHeight); }
+  function paintComposer() {
+    var send = document.getElementById('chatSend'), stop = document.getElementById('chatStop');
+    if (!send) return;
+    send.hidden = chat.busy; stop.hidden = !chat.busy;
+  }
+  function chatHistory() {
+    return chat.msgs.filter(function (m) { return m.content && !(m.role === 'assistant' && m.error && !m.content); })
+      .slice(-16).map(function (m) { return { role: m.role, content: m.content }; });
+  }
+  function sendChat(txt, isRetry) {
+    txt = String(txt || '').trim();
+    if (!txt || chat.busy) return;
+    chatLoad();
+    if (!isRetry) chat.msgs.push({ role: 'user', content: txt });
+    var hist = chatHistory();
+    var a = { role: 'assistant', content: '' };
+    chat.msgs.push(a); chat.busy = true;
+    var ctl = window.AbortController ? new AbortController() : null; chat.ctl = ctl;
+    paintChat(); scrollChatEnd(); chatSave();
+    fetch('/api/assist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'chat', messages: hist }), signal: ctl ? ctl.signal : undefined })
+      .then(function (r) {
+        if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { if (r.status === 401) showLogin(); throw new ApiErr(r.status, j.error || 'تعذّر الاتصال'); });
+        if (!r.body || !r.body.getReader || !window.TextDecoder) return r.text().then(function (t) { a.content = t; });
+        var reader = r.body.getReader(), dec = new TextDecoder();
+        function pump() {
+          return reader.read().then(function (x) {
+            if (x.done) { a.content += dec.decode(); return; }
+            a.content += dec.decode(x.value, { stream: true }); paintLast(); return pump();
+          });
+        }
+        return pump();
+      })
+      .then(null, function (e) {
+        if (e && e.name === 'AbortError') { a.stopped = true; return; }
+        a.error = (e && e instanceof ApiErr) ? e.message : 'انقطع الاتصال، جرّب مرة ثانية';
+      })
+      .then(function () {
+        var k = a.content.indexOf('\u0000');
+        if (k !== -1) { a.error = a.content.slice(k + 1).trim() || 'انقطع الرد'; a.content = a.content.slice(0, k).trim(); }
+        a.content = a.content.trim();
+        if (!a.content && !a.error && !a.stopped) a.error = 'ما وصل رد، جرّب مرة ثانية';
+        chat.busy = false; chat.ctl = null;
+        chatSave(); paintChat();
+        if (view === 'chat' && nearBottom()) scrollChatEnd();
+      });
+  }
+  function openChat() {
+    leaveSession(); view = 'chat'; document.title = 'سولف مع دفترك · مجالس المشايخ';
+    chatLoad();
+    app.innerHTML = pageTop('chat', 'سولف مع دفترك', 'يعرف كل جلساتك وأجوبة المشايخ فيها. اسأله، واطلب رأيه، وكمّل معه السالفة.') +
+      '<main class="home-main wrap chat-main">' +
+      (aiOk() ?
+        '<div class="chat-bar"><button class="linkish" type="button" id="chatNew">محادثة جديدة</button></div>' +
+        '<div class="chat-thread" id="chatThread" aria-live="polite"></div>' +
+        '<form class="chat-compose" id="chatForm" autocomplete="off"><label class="lbl" for="chatIn" hidden>رسالتك</label>' +
+        '<textarea class="input" id="chatIn" rows="1" placeholder="اكتب رسالتك"></textarea>' +
+        '<button class="btn primary" type="submit" id="chatSend">أرسل</button><button class="btn" type="button" id="chatStop" hidden>إيقاف</button></form>' +
+        '<p class="hint chat-note">الروابط تحت الردود تفتح الجلسة والسؤال اللي جاءت منه المعلومة. والمحادثة محفوظة في جهازك هذا فقط.</p>'
+        : '<p class="empty">' + (ai && !ai.ready ? 'الذكاء الاصطناعي غير مفعّل في الموقع بعد.' : 'المحادثة تحتاج موافقة المدير على استخدام الذكاء الاصطناعي في حسابك.') + '</p>') +
+      '</main>';
+    if (!aiOk()) return;
+    var f = document.getElementById('chatForm'), inp = document.getElementById('chatIn');
+    function fit() { inp.style.height = 'auto'; inp.style.height = Math.min(220, inp.scrollHeight + 2) + 'px'; }
+    inp.addEventListener('input', fit);
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && window.matchMedia('(hover: hover)').matches) { e.preventDefault(); f.requestSubmit ? f.requestSubmit() : f.dispatchEvent(new Event('submit', { cancelable: true })); }
+    });
+    f.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (chat.busy) return;
+      var t = inp.value.trim(); if (!t) return;
+      inp.value = ''; fit(); sendChat(t);
+    });
+    document.getElementById('chatStop').addEventListener('click', function () { if (chat.ctl) chat.ctl.abort(); });
+    document.getElementById('chatNew').addEventListener('click', function () {
+      if (chat.busy && chat.ctl) chat.ctl.abort();
+      chat.msgs = []; chatSave(); paintChat(); inp.focus();
+    });
+    document.getElementById('chatThread').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-chat]'); if (!b) return;
+      if (b.dataset.chat === 'retry') {
+        if (chat.busy) return;
+        var last = chat.msgs[chat.msgs.length - 1];
+        if (last && last.role === 'assistant') chat.msgs.pop();
+        var u = chat.msgs[chat.msgs.length - 1];
+        if (u && u.role === 'user') sendChat(u.content, true);
+      } else if (b.dataset.chat === 'copy') {
+        var m = chat.msgs[+b.dataset.i]; if (!m) return;
+        var plain = String(m.content).replace(/\s*\[\[[^\]]*\]\]/g, '');
+        (navigator.clipboard ? navigator.clipboard.writeText(plain) : Promise.reject()).then(function () { toast('انتسخ الرد'); }, function () { toast('ما قدرت أنسخ'); });
+      }
+    });
+    paintChat();
+    if (chatPending) { var q = chatPending; chatPending = null; sendChat(q); }
+    else if (chat.msgs.length) scrollChatEnd();
+    else inp.focus();
   }
   function tidyAction(kind, qid, li, b) {
     var box = li.querySelector('.ai-prev'), q = cur.qs[qid];
