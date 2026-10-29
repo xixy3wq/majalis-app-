@@ -2,7 +2,7 @@ import Script from "next/script";
 import UploadBridge from "./upload-bridge";
 // الواجهة كاملة في public/app.js، والبيانات من مسارات /api
 export const dynamic = "force-dynamic";
-const V = "11";
+const V = "12";
 export default function Home() {
   return (
     <>

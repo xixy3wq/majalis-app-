@@ -2076,7 +2076,7 @@
   }
 
   /* ---- the recorder (one at a time, keeps going if you move between pages) ---- */
-  var REC = null, UP = {}, recTick = null, recWake = null;
+  var REC = null, UP = {}, recTick = null, recWake = null, recNotice = null;
   function recElapsed() { if (!REC) return 0; return Math.floor((REC.acc + (REC.paused ? 0 : Date.now() - REC.t0)) / 1000); }
   function pickMime() {
     var c = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac', 'audio/ogg;codecs=opus'];
@@ -2090,7 +2090,14 @@
     navigator.wakeLock.request('screen').then(function (l) { recWake = l; l.addEventListener('release', function () { recWake = null; }); }, function () {});
   }
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible' && REC) { holdWake(); paintRecAll(); }
+    if (document.visibilityState !== 'visible') return;
+    if (REC) {
+      holdWake();
+      if (REC.mutedAt || REC.gap > 3000) {
+        recNotice = { sid: REC.sid, text: 'الجوال وقف الميكروفون لما قفلت الشاشة أو طلعت من الصفحة' + (REC.gap > 60000 ? ' (حوالي ' + nMin(Math.round(REC.gap / 60000)) + ')' : '') + '. بدل القفل استخدم «الشاشة السوداء»: الجوال يبان مطفي والتسجيل شغال.' };
+      }
+    }
+    paintRecAll();
   });
   window.addEventListener('beforeunload', function (e) {
     if (REC || Object.keys(UP).length) { e.preventDefault(); e.returnValue = ''; }
@@ -2105,7 +2112,8 @@
       if (mime) opts.mimeType = mime;
       try { mr = new MediaRecorder(stream, opts); } catch (e) { mr = new MediaRecorder(stream); }
       var rid = newId();
-      REC = { rid: rid, sid: sid, sheikh: sheikh, mr: mr, stream: stream, chunks: [], seq: 0, mime: mr.mimeType || mime || 'audio/webm', t0: Date.now(), acc: 0, paused: false, started: Date.now() };
+      REC = { rid: rid, sid: sid, sheikh: sheikh, mr: mr, stream: stream, chunks: [], seq: 0, mime: mr.mimeType || mime || 'audio/webm', t0: Date.now(), acc: 0, paused: false, started: Date.now(), gap: 0, mutedAt: 0 };
+      recNotice = null;
       var meta = { rid: rid, uid: me && me.id, sid: sid, sheikh: sheikh, mime: REC.mime, started: REC.started, seconds: 0 };
       idbPutRec(meta);
       mr.ondataavailable = function (e) {
@@ -2115,7 +2123,16 @@
       };
       mr.onstop = function () { recFinish(rid, meta); };
       mr.onerror = function () { toast('صار خطأ في التسجيل، حفظت اللي تسجّل'); recStop(); };
-      stream.getAudioTracks().forEach(function (t) { t.addEventListener('ended', function () { if (REC && REC.rid === rid) { toast('انقطع الميكروفون، حفظت اللي تسجّل'); recStop(); } }); });
+      stream.getAudioTracks().forEach(function (t) {
+        t.addEventListener('ended', function () {
+          if (!REC || REC.rid !== rid) return;
+          recNotice = { sid: sid, text: 'التسجيل وقف لأن الجوال قفل الميكروفون (غالبًا لما انقفلت الشاشة)، وانحفظ كل اللي قبلها. تقدر تبدأ تسجيل ثاني، واستخدم «الشاشة السوداء» بدل القفل.' };
+          toast('انقطع الميكروفون، حفظت اللي تسجّل'); recStop();
+        });
+        // آيفون: إذا انقفلت الشاشة غالبًا «يكتم» الميكروفون بدل ما يوقفه، فنحسب مدة الانقطاع وننبّه
+        t.addEventListener('mute', function () { if (REC && REC.rid === rid && !REC.mutedAt) REC.mutedAt = Date.now(); });
+        t.addEventListener('unmute', function () { if (REC && REC.rid === rid && REC.mutedAt) { REC.gap += Date.now() - REC.mutedAt; REC.mutedAt = 0; paintRecAll(); } });
+      });
       mr.start(5000);
       holdWake();
       clearInterval(recTick); recTick = setInterval(paintRecTime, 1000);
@@ -2143,6 +2160,7 @@
     if (!REC || REC.rid !== rid) return;
     var r = REC; REC = null;
     clearInterval(recTick); recTick = null;
+    closeDark();
     try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
     if (recWake) { try { recWake.release(); } catch (e) {} recWake = null; }
     var seconds = Math.floor(r.acc / 1000);
@@ -2200,10 +2218,43 @@
     });
   }
 
+  /* ---- black screen while recording: looks switched off, keeps the mic alive ---- */
+  var darkTap = 0, darkMove = null;
+  function openDark() {
+    if (!REC || document.getElementById('darkOv')) return;
+    var ov = document.createElement('div');
+    ov.id = 'darkOv'; ov.className = 'dark-ov'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'الشاشة السوداء، التسجيل شغال');
+    ov.innerHTML = '<div class="dark-info" id="darkInfo"><span class="rec-dot" aria-hidden="true"></span> <b id="darkT">' + fmtClock(recElapsed()) + '</b><br>اضغط مرتين بسرعة للرجوع</div>';
+    document.body.appendChild(ov);
+    document.documentElement.classList.add('no-scroll');
+    holdWake();
+    try { var fe = document.documentElement; (fe.requestFullscreen || fe.webkitRequestFullscreen || function () {}).call(fe); } catch (e) {}
+    ov.addEventListener('pointerup', function (e) {
+      e.preventDefault();
+      var now = Date.now();
+      if (now - darkTap < 450) closeDark(); else darkTap = now;
+    });
+    ov.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    // نحرّك النص كل دقيقة عشان ما يعلق أثره على الشاشة
+    clearInterval(darkMove);
+    darkMove = setInterval(function () {
+      var i = document.getElementById('darkInfo'); if (!i) return;
+      i.style.transform = 'translate(' + Math.round(Math.random() * 60 - 30) + 'px,' + Math.round(Math.random() * 200 - 100) + 'px)';
+    }, 60000);
+  }
+  function closeDark() {
+    var ov = document.getElementById('darkOv'); if (!ov) return;
+    ov.remove(); clearInterval(darkMove); darkMove = null;
+    if (!document.querySelector('.focus-ov')) document.documentElement.classList.remove('no-scroll');
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen(); else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen(); } catch (e) {}
+  }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDark(); });
+
   /* ---- painting ---- */
   function paintRecAll() { paintRecFloat(); if (view === 'session' && cur) paintRecPanel(cur.sid); }
   function paintRecTime() {
     var t = fmtClock(recElapsed());
+    var d = document.getElementById('darkT'); if (d) d.textContent = t;
     var a = document.getElementById('recTime'); if (a) a.textContent = t;
     var f = document.getElementById('recFloatT'); if (f) f.textContent = t;
   }
@@ -2247,12 +2298,14 @@
       el.innerHTML = '<div class="rec-live' + (REC.paused ? ' paused' : '') + '"><span class="rec-dot" aria-hidden="true"></span><b class="rec-time" id="recTime">' + fmtClock(recElapsed()) + '</b>' +
         '<span class="rec-state">' + (REC.paused ? 'موقّف مؤقتًا' : 'يسجّل الحين') + '</span>' +
         '<div class="btns"><button class="btn" type="button" data-rec="pause">' + (REC.paused ? 'كمّل التسجيل' : 'إيقاف مؤقت') + '</button>' +
-        '<button class="btn primary" type="button" data-rec="stop">إنهاء وحفظ</button></div>' +
-        '<span class="hint">خلّ الصفحة مفتوحة والشاشة شغالة. التسجيل ينحفظ في جهازك أول بأول، وينرفع بعد ما تنهيه. تقدر تتنقل بين أقسام الموقع والتسجيل شغال.</span></div>';
+        '<button class="btn primary" type="button" data-rec="stop">إنهاء وحفظ</button>' +
+        '<button class="btn dark-btn" type="button" data-rec="dark">الشاشة السوداء</button></div>' +
+        (recNotice && recNotice.sid === sid ? '<p class="rec-warn">' + esc(recNotice.text) + '</p>' : '') +
+        '<span class="hint">لا تقفل الجوال وقت التسجيل، لأن الآيفون يوقف الميكروفون في المتصفح إذا انقفلت الشاشة. اضغط «الشاشة السوداء» وحط الجوال على وجهه: يبان مطفي، والتسجيل شغال، ويستهلك بطارية أقل. والتسجيل ينحفظ في جهازك أول بأول.</span></div>';
       return;
     }
     var other = REC && REC.sid !== sid;
-    el.innerHTML = '<div class="btns">' +
+    el.innerHTML = (recNotice && recNotice.sid === sid ? '<p class="rec-warn">' + esc(recNotice.text) + '</p>' : '') + '<div class="btns">' +
       (recSupported() ? '<button class="btn primary" type="button" data-rec="start"' + (other ? ' disabled' : '') + '><span class="rec-dot" aria-hidden="true"></span> ابدأ التسجيل</button>' : '') +
       '<button class="btn" type="button" data-rec="file">ارفع ملف صوتي</button></div>' +
       (other ? '<p class="hint">فيه تسجيل شغال لمجلس ثاني، أنهه أول.</p>' : '') +
@@ -2413,6 +2466,7 @@
         if (b.dataset.rec === 'start') recStart(sid);
         else if (b.dataset.rec === 'pause') recPause();
         else if (b.dataset.rec === 'stop') recStop();
+        else if (b.dataset.rec === 'dark') openDark();
         else if (b.dataset.rec === 'file') file.click();
         return;
       }
