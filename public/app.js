@@ -361,7 +361,7 @@
       '<div class="field"><label for="ai-sheikh">اسم الشيخ</label><input class="input" id="ai-sheikh" required placeholder="مثال: الشيخ مساعد الطيار"></div>' +
       '<div class="field"><label for="ai-hint">معلومة تميّزه (اختياري)</label><input class="input" id="ai-hint" placeholder="جامعته، أو كتاب له، أو مدينته"></div>' +
       '<div class="field wide"><label for="ai-topic">موضوع الجلسة</label><input class="input" id="ai-topic" placeholder="وش تبي تركّز عليه مع الشيخ؟"></div>' +
-      '<div class="field wide"><label for="ai-about">عرّف بنفسك وطلابك (اختياري)</label><input class="input" id="ai-about" placeholder="مثال: مشرف حلقة تحفيظ، طلابي في المرحلة المتوسطة" value="' + esc(me.about || '') + '"></div>' +
+      '<div class="field wide"><label for="ai-about">عرّف بنفسك (اختياري)</label><input class="input" id="ai-about" placeholder="وش تبي الذكاء الاصطناعي يعرف عنك؟ مثل: شغلك أو اهتمامك" value="' + esc(me.about || '') + '"></div>' +
       '</div><p class="login-err" id="ai-err" role="alert"></p>' +
       '<div class="btns"><button class="btn primary" type="submit">جهّز الجلسة</button></div></form>' +
       '<div id="aiProgress" hidden></div></section>';
@@ -930,7 +930,7 @@
       recSectionHtml() +
       '<section class="sec" id="sec-notes" aria-labelledby="h-notes"><h2 id="h-notes">ملاحظات عامة</h2><div class="notes-grid">' +
       '<div class="field"><label for="m-books">كتب وآثار ذكرها الشيخ</label><textarea class="note" id="m-books" data-f="books" placeholder="اكتب أسماء الكتب والآثار كما ذكرها"></textarea></div>' +
-      '<div class="field"><label for="m-general">فوائد وأفكار للتطبيق</label><textarea class="note" id="m-general" data-f="general" placeholder="أي فائدة أو فكرة تبي تطبقها مع طلابك"></textarea></div>' +
+      '<div class="field"><label for="m-general">فوائد وأفكار للتطبيق</label><textarea class="note" id="m-general" data-f="general" placeholder="أي فائدة أو فكرة تبي تطبقها"></textarea></div>' +
       '</div><div class="btns"><button class="btn primary" id="copyAll" type="button">نسخ الجلسة كاملة</button><button class="btn" id="copyQ" type="button">نسخ الأسئلة فقط</button>' +
       '<button class="btn" id="dlDoc" type="button">تنزيل Word</button><button class="btn" id="printBtn" type="button">طباعة أو PDF</button></div>' +
       '<span class="hint">ملف Word والطباعة فيها الأسئلة والأجوبة والفوائد والكتب، بدون التحضير وتحليل الشخصية.</span>' +
@@ -1009,6 +1009,7 @@
     paintMeta();
     renderQuestions();
     if (first) loadRecs(sid);
+    var rp = document.getElementById('redoPrep'); if (rp) rp.hidden = !(j.ai && aiOk());
     if (first && cur.jump) { var jq = cur.jump; setTimeout(function () { jumpTo(jq); }, 60); }
     var l = document.getElementById('loading'), body = document.getElementById('sessionBody');
     if (l) l.hidden = true;
@@ -1026,7 +1027,9 @@
 
   function richSection(id, title, field, placeholder) {
     return '<section class="sec" id="' + id + '" aria-labelledby="h-' + id + '"><div class="sec-head"><h2 id="h-' + id + '">' + title + '</h2>' +
-      '<button class="btn" type="button" data-rich="' + field + '">تعديل</button></div>' +
+      '<div class="btns">' + (field === 'opening' ? '<button class="btn" type="button" id="redoPrep" hidden>جهّزه من جديد</button>' : '') +
+      '<button class="btn" type="button" data-rich="' + field + '">تعديل</button></div></div>' +
+      (field === 'opening' ? '<p class="hint" id="redoMsg" role="status" hidden></p>' : '') +
       '<div class="rich" id="rv-' + field + '"></div>' +
       '<div id="re-' + field + '" hidden class="field"><textarea class="note rich-in" id="ri-' + field + '" data-f="' + field + '" placeholder="' + placeholder + '"></textarea>' +
       '<span class="hint">للتنسيق: سطر يبدأ بـ ## عنوان، و### عنوان فرعي، و- نقطة، و1. رقم، و&gt; اقتباس، و**نص** للتمييز.</span></div></section>';
@@ -1181,7 +1184,31 @@
     else { var k = 'm/' + cur.sid + '/' + f; if (WQ[k] && WQ[k].timer) run(k); paintMeta(); }
   });
 
+  function redoPrep(b) {
+    var msg = document.getElementById('redoMsg'), sid = cur.sid;
+    if (!b.classList.contains('arm')) {
+      b.classList.add('arm'); b.textContent = 'اضغط مرة ثانية للتأكيد';
+      msg.hidden = false; msg.textContent = 'يكتب التحضير وتحليل الشيخ من جديد بنفس البحث عنه، ويستبدل الأسئلة اللي ما سألتها ولا كتبت جوابها. اللي كتبته يبقى.';
+      return;
+    }
+    b.disabled = true; b.textContent = 'يجهّز…';
+    msg.textContent = 'يحلل شخصية الشيخ من جديد… (١ من ٢)';
+    flushAll();
+    api('/api/gen', { op: 'redoBrief', majlisId: sid }).then(function () {
+      if (cur && cur.sid === sid) msg.textContent = 'يكتب التحضير والأسئلة… (٢ من ٢)';
+      return api('/api/gen', { op: 'redoPlan', majlisId: sid });
+    }).then(function () {
+      if (!cur || cur.sid !== sid) return;
+      b.disabled = false; b.classList.remove('arm'); b.textContent = 'جهّزه من جديد'; msg.hidden = true;
+      loadSession(sid, false); toast('انجهّز التحضير والأسئلة من جديد');
+    }, function (e) {
+      if (!cur || cur.sid !== sid) return;
+      b.disabled = false; b.classList.remove('arm'); b.textContent = 'جهّزه من جديد'; msg.textContent = e.message;
+    });
+  }
   function wireSession() {
+    var rpb = document.getElementById('redoPrep');
+    if (rpb) rpb.addEventListener('click', function () { redoPrep(rpb); });
     document.querySelector('nav.bar .links').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-jump]'); if (!b) return;
       var t = document.getElementById(b.dataset.jump); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });

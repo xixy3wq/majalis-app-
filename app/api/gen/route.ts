@@ -34,6 +34,38 @@ export async function POST(req: Request) {
       return await research(job.id, me.id);
     }
 
+    // إعادة تجهيز جلسة موجودة (من نفس البحث المحفوظ، بدون بحث جديد): redoBrief ثم redoPlan
+    if (b.op === "redoBrief" || b.op === "redoPlan") {
+      const m = await prisma.majlis.findFirst({ where: { id: String(b.majlisId || ""), userId: me.id }, include: { questions: true } });
+      if (!m) fail("ما لقيت هذا المجلس", 404);
+      const jj = await prisma.aiJob.findFirst({ where: { majlisId: m!.id, userId: me.id }, orderBy: { createdAt: "desc" } });
+      if (!jj || !jj.research) fail("هذي الجلسة ما انجهّزت بالذكاء الاصطناعي، فما عندي بحث عن الشيخ أعيد منه", 400);
+      const r = jj!.research as Research;
+      if (b.op === "redoBrief") {
+        const out = await askClaude({ system: BRIEF_SYSTEM, prompt: briefPrompt(r, m!.topic, me.about), maxTokens: 6000, deadlineMs: 240000 });
+        const brief = parse<Brief>(out.text, "تحليل الشخصية");
+        await prisma.aiJob.update({ where: { id: jj!.id }, data: { brief: brief as any } });
+        await prisma.majlis.update({ where: { id: m!.id }, data: { briefing: buildBriefing(r, brief) } });
+        return { ok: true };
+      }
+      const out = await askClaude({ system: PLAN_SYSTEM, prompt: planPrompt(r, (jj!.brief || {}) as Brief, m!.topic, me.about), maxTokens: 7000, deadlineMs: 240000 });
+      const plan = parse<Plan>(out.text, "خطة الجلسة");
+      const qs = buildQuestions(plan);
+      if (!qs.length) fail("ما طلعت أسئلة، جرّب مرة ثانية", 502);
+      // نبقي الأسئلة اللي سألها أو كتب جوابها، ونستبدل الباقي
+      const keep = m!.questions.filter((q) => q.asked || q.answer.trim());
+      const drop = m!.questions.filter((q) => !(q.asked || q.answer.trim())).map((q) => q.id);
+      const base: Record<string, number> = {};
+      keep.forEach((q) => { base[q.grp] = Math.max(base[q.grp] ?? -1, q.pos); });
+      await prisma.$transaction([
+        prisma.question.deleteMany({ where: { id: { in: drop } } }),
+        prisma.question.createMany({ data: qs.map((q) => ({ majlisId: m!.id, text: q.text, why: q.why, grp: q.group, pos: (base[q.group] ?? -1) + 1 + q.order })) }),
+        prisma.majlis.update({ where: { id: m!.id }, data: { opening: buildOpening(plan) } }),
+        prisma.aiJob.update({ where: { id: jj!.id }, data: { plan: plan as any } }),
+      ]);
+      return { ok: true, kept: keep.length, added: qs.length };
+    }
+
     const job = await prisma.aiJob.findFirst({ where: { id: String(b.id || ""), userId: me.id } });
     if (!job) fail("ما لقيت عملية التوليد", 404);
     const j = job!;
