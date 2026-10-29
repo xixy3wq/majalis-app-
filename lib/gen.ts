@@ -138,7 +138,7 @@ ${DIALECT}
 - «من هو»: من ٣ إلى ٦ نقاط قصيرة من السيرة.
 - إذا فيه تشابه أسماء أو المعلومات قليلة، اكتب ذلك في caution.
 ${STYLE_TRAIT}
-اكتب JSON فقط بهذا الشكل:
+احفظ النتيجة بأداة الحفظ بهذا الشكل:
 {"who": ["نقطة"], "traits": [{"title": "عنوان قصير", "evidence": "الدليل", "meaning": "وش يعني لك"}], "caution": ""}`;
 
 export function briefPrompt(r: Research, topic: string, about: string) {
@@ -173,7 +173,7 @@ ${DIALECT}
 - during وavoid: نصائح عملية مبنية على تحليل شخصيته، مو نصائح عامة.
 - closing: كيف يختم المجلس بطريقة تناسب هذا الشيخ (جملة ختام أو طلب أخير)، بدون تكرار سؤال ask.
 ${STYLE_Q}
-اكتب JSON فقط بهذا الشكل:
+احفظ النتيجة بأداة الحفظ بهذا الشكل:
 {"angle": "...", "hook": "...", "opening": ["خطوة"], "bridge": "...", "before": ["..."], "during": ["..."], "avoid": ["..."], "closing": "...", "questions": [{"text": "...", "why": "...", "group": "core"}]}`;
 
 export function planPrompt(r: Research, b: Brief, topic: string, about: string) {
@@ -183,3 +183,35 @@ ${JSON.stringify(r)}
 تحليل الشخصية:
 ${JSON.stringify(b)}`;
 }
+
+/* ---------------- مخططات النتائج (للرد المنظم المضمون) ---------------- */
+const S = { type: "string" };
+const LIST = { type: "array", items: S };
+export const BRIEF_SCHEMA = {
+  type: "object",
+  properties: {
+    who: LIST,
+    traits: { type: "array", items: { type: "object", properties: { title: S, evidence: S, meaning: S }, required: ["title", "evidence", "meaning"] } },
+    caution: S,
+  },
+  required: ["who", "traits"],
+};
+export const PLAN_SCHEMA = {
+  type: "object",
+  properties: {
+    angle: S, hook: S, opening: LIST, bridge: S, before: LIST, during: LIST, avoid: LIST, closing: S,
+    questions: { type: "array", items: { type: "object", properties: { text: S, why: S, group: { type: "string", enum: ["core", "ask", "spare"] } }, required: ["text", "group"] } },
+  },
+  required: ["angle", "hook", "opening", "questions"],
+};
+export const RESEARCH_SCHEMA = {
+  type: "object",
+  properties: {
+    name: S, found: { type: "boolean" }, identity: S, namesakes: S, bio: LIST,
+    quotes: { type: "array", items: { type: "object", properties: { text: S, context: S, source: { type: "number" } }, required: ["text"] } },
+    observations: { type: "array", items: { type: "object", properties: { point: S, source: { type: "number" } }, required: ["point"] } },
+    works: { type: "array", items: { type: "object", properties: { title: S, note: S }, required: ["title"] } },
+    sources: { type: "array", items: { type: "object", properties: { n: { type: "number" }, title: S, url: S }, required: ["n", "url"] } },
+  },
+  required: ["name", "found", "bio", "sources"],
+};

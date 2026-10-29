@@ -108,3 +108,29 @@ export async function streamClaude(opts: { system: any; messages: Msg[]; maxToke
     cancel() { clearTimeout(timer); ctl.abort(); },
   });
 }
+
+/**
+ * رد منظم مضمون: نجبر Claude يرجّع النتيجة عبر «أداة» لها مخطط JSON، فيرجع كائن صالح دائمًا
+ * (بدل نص JSON ممكن ينكسر بعلامة تنصيص أو ينقطع).
+ */
+export async function askClaudeJson<T = any>(opts: { system: string; prompt: string; name: string; schema: any; maxTokens?: number; deadlineMs?: number }): Promise<T> {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) fail("الذكاء الاصطناعي غير مفعّل: صاحب الموقع لازم يضيف مفتاح Claude API", 503);
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": key!, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({
+      model: MODEL(), max_tokens: opts.maxTokens || 12000, system: opts.system,
+      messages: [{ role: "user", content: opts.prompt }],
+      tools: [{ name: opts.name, description: "احفظ النتيجة النهائية بهذا الشكل.", input_schema: opts.schema }],
+      tool_choice: { type: "tool", name: opts.name },
+    }),
+    signal: AbortSignal.timeout(opts.deadlineMs || 280000),
+  }).catch((e) => fail(e?.name === "TimeoutError" ? "أخذ الرد وقت أطول من المتوقع، جرّب مرة ثانية" : "ما قدرت أتصل بـ Claude، جرّب بعد شوي", 502));
+  const d: any = await (r as Response).json().catch(() => ({}));
+  if (!(r as Response).ok) apiError((r as Response).status, String(d?.error?.message || ""));
+  if (d.stop_reason === "max_tokens") fail("الرد طلع أطول من المسموح وانقطع، جرّب مرة ثانية", 502);
+  const block = (d.content || []).find((c: any) => c.type === "tool_use" && c.name === opts.name);
+  if (!block || typeof block.input !== "object") fail("ما رجع الذكاء الاصطناعي نتيجة مرتبة، جرّب مرة ثانية", 502);
+  return block.input as T;
+}

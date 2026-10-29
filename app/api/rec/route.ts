@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { fail, handle, requireUser, text } from "@/lib/auth";
-import { aiReady, askClaude } from "@/lib/claude";
+import { aiReady, askClaudeJson } from "@/lib/claude";
 import { extractJson } from "@/lib/gen";
 import { blobAccess, blobReady, delFiles, readUrl, rememberAccess, SAFE_LIMIT, storageUsed, uploadMode } from "@/lib/blob";
 import { asrReady, deleteAsr, pollAsr, startAsr } from "@/lib/asr";
@@ -65,7 +65,19 @@ const SUM_RULES =
   "7. summary: خلاصة المجلس في 3 إلى 6 أسطر، كل سطر يبدأ بـ «- ».\n" +
   "8. لا تكرر نفس المعلومة في أكثر من مكان، واختصر بدون ما تضيّع المعنى.\n" +
   STYLE + "\n" +
-  'أعد JSON فقط بهذا الشكل: {"sheikh":"B","summary":"- …","answers":[{"qid":"…","answer":"- …","at":"12:30"}],"extra":[{"q":"…","answer":"- …","at":"…"}],"guidance":["…"],"books":["…"]}';
+  'احفظ النتيجة بأداة الحفظ بهذا الشكل: {"sheikh":"B","summary":"- …","answers":[{"qid":"…","answer":"- …","at":"12:30"}],"extra":[{"q":"…","answer":"- …","at":"…"}],"guidance":["…"],"books":["…"]}';
+
+const STR = { type: "string" };
+const SUM_SCHEMA = {
+  type: "object",
+  properties: {
+    sheikh: STR, summary: STR,
+    answers: { type: "array", items: { type: "object", properties: { qid: STR, answer: STR, at: STR }, required: ["qid", "answer"] } },
+    extra: { type: "array", items: { type: "object", properties: { q: STR, answer: STR, at: STR }, required: ["q", "answer"] } },
+    guidance: { type: "array", items: STR }, books: { type: "array", items: STR },
+  },
+  required: ["summary", "answers", "extra", "guidance", "books"],
+};
 
 function cleanSummary(raw: any, qids: Set<string>) {
   const s = (v: unknown, max = 20000) => String(v ?? "").trim().slice(0, max);
@@ -184,9 +196,7 @@ export async function POST(req: Request) {
       await prisma.recording.update({ where: { id: r.id }, data: { status: "summarizing", error: "" } });
       try {
         const tr = r.transcript.length > 350000 ? r.transcript.slice(0, 350000) + "\n(…بقية التفريغ محذوفة لطولها)" : r.transcript;
-        const out = await askClaude({ system: SUM_RULES, prompt: sumPrompt(m) + "\n\n===\nالتفريغ:\n" + tr, maxTokens: 16000, deadlineMs: 285000 });
-        let raw: any;
-        try { raw = extractJson(out.text); } catch { fail(out.truncated ? "التلخيص طلع طويل وانقطع، جرّب مرة ثانية" : "ما قدرت أقرأ ناتج التلخيص، جرّب مرة ثانية", 502); }
+        const raw: any = await askClaudeJson({ system: SUM_RULES, prompt: sumPrompt(m) + "\n\n===\nالتفريغ:\n" + tr, name: "save_summary", schema: SUM_SCHEMA, maxTokens: 16000, deadlineMs: 285000 });
         const summary = cleanSummary(raw, new Set(m.questions.map((q) => q.id)));
         const r2 = await prisma.recording.update({ where: { id: r.id }, data: { status: "ready", summary: summary as any, error: "" } });
         return { rec: await view(r2, false) };

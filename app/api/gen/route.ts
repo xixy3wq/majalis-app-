@@ -1,9 +1,9 @@
 import { prisma } from "@/lib/db";
 import { fail, handle, requireUser, text } from "@/lib/auth";
-import { aiReady, askClaude } from "@/lib/claude";
+import { aiReady, askClaude, askClaudeJson } from "@/lib/claude";
 import { dailyLimit, usedToday } from "@/lib/limits";
 import {
-  BRIEF_SYSTEM, PLAN_SYSTEM, RESEARCH_SYSTEM, briefPrompt, buildBriefing, buildOpening, buildQuestions,
+  BRIEF_SCHEMA, BRIEF_SYSTEM, PLAN_SCHEMA, PLAN_SYSTEM, RESEARCH_SCHEMA, RESEARCH_SYSTEM, briefPrompt, buildBriefing, buildOpening, buildQuestions,
   extractJson, planPrompt, researchPrompt, type Brief, type Plan, type Research,
 } from "@/lib/gen";
 export const dynamic = "force-dynamic";
@@ -42,14 +42,12 @@ export async function POST(req: Request) {
       if (!jj || !jj.research) fail("هذي الجلسة ما انجهّزت بالذكاء الاصطناعي، فما عندي بحث عن الشيخ أعيد منه", 400);
       const r = jj!.research as Research;
       if (b.op === "redoBrief") {
-        const out = await askClaude({ system: BRIEF_SYSTEM, prompt: briefPrompt(r, m!.topic, me.about), maxTokens: 6000, deadlineMs: 240000 });
-        const brief = parse<Brief>(out.text, "تحليل الشخصية");
+        const brief = await askClaudeJson<Brief>({ system: BRIEF_SYSTEM, prompt: briefPrompt(r, m!.topic, me.about), name: "save_brief", schema: BRIEF_SCHEMA, maxTokens: 10000, deadlineMs: 270000 });
         await prisma.aiJob.update({ where: { id: jj!.id }, data: { brief: brief as any } });
         await prisma.majlis.update({ where: { id: m!.id }, data: { briefing: buildBriefing(r, brief) } });
         return { ok: true };
       }
-      const out = await askClaude({ system: PLAN_SYSTEM, prompt: planPrompt(r, (jj!.brief || {}) as Brief, m!.topic, me.about), maxTokens: 7000, deadlineMs: 240000 });
-      const plan = parse<Plan>(out.text, "خطة الجلسة");
+      const plan = await askClaudeJson<Plan>({ system: PLAN_SYSTEM, prompt: planPrompt(r, (jj!.brief || {}) as Brief, m!.topic, me.about), name: "save_plan", schema: PLAN_SCHEMA, maxTokens: 12000, deadlineMs: 270000 });
       const qs = buildQuestions(plan);
       if (!qs.length) fail("ما طلعت أسئلة، جرّب مرة ثانية", 502);
       // نبقي الأسئلة اللي سألها أو كتب جوابها، ونستبدل الباقي
@@ -73,16 +71,14 @@ export async function POST(req: Request) {
     if (b.op === "brief") {
       if (!j.research) fail("ابدأ بالبحث أول");
       if (j.brief) return { id: j.id, status: "brief" };
-      const out = await askClaude({ system: BRIEF_SYSTEM, prompt: briefPrompt(j.research as Research, j.topic, me.about), maxTokens: 6000, deadlineMs: 240000 });
-      const brief = parse<Brief>(out.text, "تحليل الشخصية");
+      const brief = await askClaudeJson<Brief>({ system: BRIEF_SYSTEM, prompt: briefPrompt(j.research as Research, j.topic, me.about), name: "save_brief", schema: BRIEF_SCHEMA, maxTokens: 10000, deadlineMs: 270000 });
       await prisma.aiJob.update({ where: { id: j.id }, data: { brief: brief as any, status: "brief", error: null } });
       return { id: j.id, status: "brief" };
     }
     if (b.op === "plan") {
       if (!j.research || !j.brief) fail("كمّل الخطوات اللي قبل أول");
       if (j.plan) return { id: j.id, status: "plan" };
-      const out = await askClaude({ system: PLAN_SYSTEM, prompt: planPrompt(j.research as Research, j.brief as Brief, j.topic, me.about), maxTokens: 6000, deadlineMs: 240000 });
-      const plan = parse<Plan>(out.text, "الأسئلة");
+      const plan = await askClaudeJson<Plan>({ system: PLAN_SYSTEM, prompt: planPrompt(j.research as Research, j.brief as Brief, j.topic, me.about), name: "save_plan", schema: PLAN_SCHEMA, maxTokens: 12000, deadlineMs: 270000 });
       if (!buildQuestions(plan).length) fail("ما طلعت أسئلة، جرّب الخطوة مرة ثانية", 502);
       await prisma.aiJob.update({ where: { id: j.id }, data: { plan: plan as any, status: "plan", error: null } });
       return { id: j.id, status: "plan" };
@@ -112,7 +108,15 @@ async function research(id: string, userId: string) {
   if (j!.research) return { id, status: "research", preview: preview(j!.research as Research) };
   try {
     const out = await askClaude({ system: RESEARCH_SYSTEM, prompt: researchPrompt(j!.sheikh, j!.hint, j!.topic), maxTokens: 8000, webSearch: 8, deadlineMs: 270000 });
-    const r = parse<Research>(out.text, "البحث");
+    let r: Research;
+    try { r = extractJson<Research>(out.text); }
+    catch {
+      // البحث نفسه غالي (بحث في الإنترنت)، فإذا انكسر شكل النتيجة نرتّبها بطلب صغير بدل ما نعيد البحث
+      r = await askClaudeJson<Research>({
+        system: "رتّب نتائج البحث التالية في الشكل المطلوب كما هي بالضبط، بدون حذف ولا إضافة ولا تعديل على أي معلومة أو اقتباس أو رابط.",
+        prompt: out.text, name: "save_research", schema: RESEARCH_SCHEMA, maxTokens: 10000, deadlineMs: 120000,
+      });
+    }
     if (r.found === false && !(r.bio || []).length) fail("ما لقيت معلومات كافية عن هذا الشيخ. جرّب تكتب اسمه كامل أو معلومة تميّزه", 422);
     await prisma.aiJob.update({ where: { id, }, data: { research: r as any, status: "research", error: null } });
     return { id, status: "research", preview: preview(r) };
