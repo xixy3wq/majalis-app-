@@ -49,7 +49,7 @@ export async function waSend(c: WaCfg, phone: string, text: string): Promise<{ o
   return { ok, resp: `${r.status} ${body}` };
 }
 /** إشعار للمدير، ما يرمي خطأ أبدًا (ما نبي تسجيل مستخدم أو مهمة تفشل بسبب الواتساب) */
-export async function notifyAdmin(kind: "register" | "reminder", text: string) {
+export async function notifyAdmin(kind: "register" | "reminder" | "backup" | "rec", text: string) {
   try {
     const c = await waCfg();
     if (!c.jwt || !c.device || !intlPhone(c.notifyPhone)) return;

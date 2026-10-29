@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { fail, handle, ID_RE, requireUser, text } from "@/lib/auth";
+import { delRecordingFiles } from "@/lib/blob";
 export const dynamic = "force-dynamic";
 
 const META = ["sheikh", "topic", "date", "time", "place", "opening", "briefing", "books", "general"] as const;
@@ -68,11 +69,13 @@ export async function POST(req: Request) {
       }
       case "deleteMajlis": {
         await ownMajlis(me.id, b.id);
+        await delRecordingFiles({ majlisId: b.id, userId: me.id });
         await prisma.majlis.delete({ where: { id: b.id } });
         return { ok: true };
       }
       case "deleteMajlisMany": {
         const ids = Array.isArray(b.ids) ? b.ids.map(String).slice(0, 500) : [];
+        await delRecordingFiles({ majlisId: { in: ids }, userId: me.id });
         const r = await prisma.majlis.deleteMany({ where: { id: { in: ids }, userId: me.id } });
         return { n: r.count };
       }

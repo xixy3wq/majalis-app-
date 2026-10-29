@@ -51,6 +51,7 @@ model Majlis {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   questions Question[]
+  recordings Recording[]
 
   @@index([userId])
   @@index([shareToken])
@@ -96,4 +97,29 @@ model AiJob {
   updatedAt DateTime @updatedAt
 
   @@index([userId, createdAt])
+}
+
+/// تسجيل صوتي لمجلس. الملف نفسه في Vercel Blob (مخزن خاص)، وهنا بياناته والتفريغ والملخص.
+/// status: uploaded ← transcribing ← transcribed ← summarizing ← ready ← applied (أو error)
+model Recording {
+  id         String   @id @default(cuid())
+  majlisId   String
+  majlis     Majlis   @relation(fields: [majlisId], references: [id], onDelete: Cascade)
+  userId     String
+  url        String
+  pathname   String   @default("")
+  size       Int      @default(0)
+  seconds    Int      @default(0)
+  mime       String   @default("")
+  name       String   @default("")
+  status     String   @default("uploaded")
+  asrId      String?
+  transcript String   @default("")
+  summary    Json?
+  error      String   @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([majlisId])
+  @@index([userId])
 }

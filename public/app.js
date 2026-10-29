@@ -299,6 +299,7 @@
         });
     });
     renderList();
+    homeLeftovers();
     wireAi();
     api('/api/data').then(function (j) {
       list = j.majalis || []; pendingN = j.pending || 0;
@@ -771,10 +772,14 @@
       '<section class="wa-card" aria-labelledby="wa-h"><div class="sec-head"><h2 id="wa-h">إشعارات واتساب</h2><span class="chip" id="waState"></span></div>' +
       '<p class="lede">يوصلك على واتساب كل طلب تسجيل جديد، وتذكير قبل مجالسك بيوم. الإرسال من رقمك المربوط في «الواتس الذكي»، نفس موقع التسميع.</p>' +
       '<div id="waBody"><p class="hint">جاري التحميل</p></div></section>' +
+      '<section class="wa-card" aria-labelledby="bk-h"><div class="sec-head"><h2 id="bk-h">النسخ الاحتياطي</h2><span class="chip" id="bkState"></span></div>' +
+      '<p class="lede">كل ليلة الساعة ٣ الفجر ينحفظ نسخة كاملة من كل الحسابات وجلساتهم وأسئلتهم في مخزن مستقل عن قاعدة البيانات، وتبقى آخر ٣٠ نسخة. وتقدر تنزّل أي نسخة لجهازك، أو تسترجع منها.</p>' +
+      '<div id="bkBody"><p class="hint">جاري التحميل</p></div></section>' +
       '<div class="btns"><button class="btn ghost" id="selUsers" type="button">تحديد عدة مستخدمين</button></div>' +
       '<div class="list" id="users"><p class="empty">جاري التحميل</p></div></main>';
     document.getElementById('selUsers').addEventListener('click', function () { startSel('users'); });
     loadWa();
+    loadBackups();
     document.getElementById('invCopy').addEventListener('click', function () {
       var inp = document.getElementById('invLink');
       function fb() { inp.focus(); inp.select(); toast('حدّد الرابط وانسخه'); }
@@ -879,11 +884,13 @@
       '<div class="field"><label for="m-time">الوقت</label><input class="input" id="m-time" data-f="time" type="time"></div>' +
       '<div class="field"><label for="m-place">المكان</label><input class="input" id="m-place" data-f="place" placeholder="المسجد أو المدينة"></div>' +
       '</div>' +
-      '<div class="btns s-actions"><a class="btn" id="icsBtn" href="#">أضف للتقويم</a><button class="btn" id="shareBtn" type="button" aria-expanded="false">مشاركة للقراءة</button></div>' +
+      '<div class="btns s-actions">' + (recAllowed() ? '<button class="btn rec-quick" id="recQuick" type="button"><span class="rec-dot" aria-hidden="true"></span> سجّل المجلس</button>' : '') +
+      '<a class="btn" id="icsBtn" href="#">أضف للتقويم</a><button class="btn" id="shareBtn" type="button" aria-expanded="false">مشاركة للقراءة</button></div>' +
       '<div class="share-panel" id="sharePanel" hidden></div></header>' +
       '<nav class="bar" aria-label="أقسام الجلسة"><div class="wrap"><div class="links">' +
       '<button type="button" data-jump="sec-prep">التحضير</button>' +
       '<button type="button" data-jump="sec-q">الأسئلة</button>' +
+      (recAllowed() ? '<button type="button" data-jump="sec-rec">التسجيل</button>' : '') +
       '<button type="button" data-jump="sec-notes">ملاحظات عامة</button>' +
       '<button type="button" data-jump="sec-brief">عن الشيخ</button>' +
       '</div><span class="timer-pill" id="timerPill" hidden></span><span class="status" id="status" data-s="connecting" role="status" aria-live="polite">جاري التجهيز</span></div></nav>' +
@@ -910,6 +917,7 @@
       GROUPS.map(function (g) { return '<option value="' + g.key + '">' + g.label + '</option>'; }).join('') +
       '</select></div><button class="btn primary" type="submit">إضافة السؤال</button></div></form>' +
       '</section>' +
+      recSectionHtml() +
       '<section class="sec" id="sec-notes" aria-labelledby="h-notes"><h2 id="h-notes">ملاحظات عامة</h2><div class="notes-grid">' +
       '<div class="field"><label for="m-books">كتب وآثار ذكرها الشيخ</label><textarea class="note" id="m-books" data-f="books" placeholder="اكتب أسماء الكتب والآثار كما ذكرها"></textarea></div>' +
       '<div class="field"><label for="m-general">فوائد وأفكار للتطبيق</label><textarea class="note" id="m-general" data-f="general" placeholder="أي فائدة أو فكرة تبي تطبقها مع طلابك"></textarea></div>' +
@@ -926,6 +934,14 @@
       '<div class="danger-zone"><button class="btn ghost" id="delSession" type="button">حذف الجلسة</button></div>' +
       '</div></main>';
     wireSession();
+    wireRec(sid);
+    paintRecPanel(sid);
+    var rq = document.getElementById('recQuick');
+    if (rq) rq.addEventListener('click', function () {
+      var sec = document.getElementById('sec-rec');
+      if (!REC && !UP[sid] && ai && ai.store) recStart(sid);
+      if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
     refreshStatus();
     loadSession(sid, true);
   }
@@ -982,6 +998,7 @@
     cur.loaded = true;
     paintMeta();
     renderQuestions();
+    if (first) loadRecs(sid);
     if (first && cur.jump) { var jq = cur.jump; setTimeout(function () { jumpTo(jq); }, 60); }
     var l = document.getElementById('loading'), body = document.getElementById('sessionBody');
     if (l) l.hidden = true;
@@ -1968,6 +1985,628 @@
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible' && wake.want && !wake.lock && 'wakeLock' in navigator) wake.acquire().catch(function () {});
   });
+
+  /* ================= RECORDING: record, upload, transcribe, summarize ================= */
+  function recAllowed() { return !!(ai && ai.allowed); }
+  function recSupported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
+  function fmtSize(b) {
+    b = Number(b) || 0;
+    if (b < 1024 * 1024) return ar(Math.max(1, Math.round(b / 1024))) + ' كيلو';
+    if (b < 1024 * 1024 * 1024) return ar((b / 1048576).toFixed(b < 10485760 ? 1 : 0)).replace('.', '٫') + ' ميجا';
+    return ar(String(+(b / 1073741824).toFixed(2))).replace('.', '٫') + ' جيجا';
+  }
+  function fmtClock(sec) {
+    sec = Math.max(0, Math.floor(sec || 0));
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return ar((h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(s).padStart(2, '0'));
+  }
+  function fmtDur(sec) {
+    sec = Math.round(sec || 0); if (!sec) return '';
+    var m = Math.round(sec / 60);
+    if (m < 1) return ar(sec) + ' ثانية';
+    if (m < 60) return nMin(m);
+    var h = Math.floor(m / 60), r = m % 60;
+    return (h === 1 ? 'ساعة' : h === 2 ? 'ساعتين' : ar(h) + ' ساعات') + (r ? ' و' + nMin(r) : '');
+  }
+  function atSecs(t) {
+    var p = String(t || '').replace(/[٠-٩]/g, function (d) { return DIG.indexOf(d); }).split(':').map(Number);
+    if (p.some(isNaN)) return -1;
+    return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p.length === 2 ? p[0] * 60 + p[1] : -1;
+  }
+  function blobLib() {
+    return new Promise(function (res, rej) {
+      var n = 0;
+      (function wait() {
+        if (window.majalisBlob) { window.majalisBlob().then(res, function () { rej(new ApiErr(0, 'ما تحمّلت أداة الرفع، حدّث الصفحة')); }); return; }
+        if (++n > 50) { rej(new ApiErr(0, 'ما تحمّلت أداة الرفع، حدّث الصفحة')); return; }
+        setTimeout(wait, 200);
+      })();
+    });
+  }
+
+  /* ---- local backup of recording chunks (IndexedDB) so nothing is lost if the page closes ---- */
+  var idbP = null;
+  function idb() {
+    if (!window.indexedDB) return Promise.reject(new Error('no idb'));
+    if (idbP) return idbP;
+    idbP = new Promise(function (res, rej) {
+      var r;
+      try { r = indexedDB.open('majalis-rec', 1); } catch (e) { rej(e); return; }
+      r.onupgradeneeded = function () {
+        var db = r.result;
+        if (!db.objectStoreNames.contains('recs')) db.createObjectStore('recs', { keyPath: 'rid' });
+        if (!db.objectStoreNames.contains('chunks')) db.createObjectStore('chunks', { autoIncrement: true }).createIndex('rid', 'rid');
+      };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { idbP = null; rej(r.error); };
+    });
+    return idbP;
+  }
+  function idbDo(stores, mode, fn) {
+    return idb().then(function (db) {
+      return new Promise(function (res, rej) {
+        var tx = db.transaction(stores, mode), out = { v: undefined };
+        fn(tx, out);
+        tx.oncomplete = function () { res(out.v); };
+        tx.onerror = tx.onabort = function () { rej(tx.error); };
+      });
+    });
+  }
+  function idbPutRec(rec) { return idbDo(['recs'], 'readwrite', function (tx) { tx.objectStore('recs').put(rec); }).catch(function () {}); }
+  function idbAddChunk(rid, seq, data) { return idbDo(['chunks'], 'readwrite', function (tx) { tx.objectStore('chunks').add({ rid: rid, seq: seq, data: data }); }).catch(function () {}); }
+  function idbList() {
+    return idbDo(['recs'], 'readonly', function (tx, out) { var q = tx.objectStore('recs').getAll(); q.onsuccess = function () { out.v = q.result || []; }; })
+      .then(function (l) { return (l || []).filter(function (r) { return r.uid === (me && me.id); }); }, function () { return []; });
+  }
+  function idbBlob(rec) {
+    return idbDo(['chunks'], 'readonly', function (tx, out) {
+      var q = tx.objectStore('chunks').index('rid').getAll(rec.rid);
+      q.onsuccess = function () { out.v = q.result || []; };
+    }).then(function (rows) {
+      rows.sort(function (a, b) { return a.seq - b.seq; });
+      return new Blob(rows.map(function (x) { return x.data; }), { type: rec.mime || 'audio/webm' });
+    });
+  }
+  function idbDel(rid) {
+    return idbDo(['recs', 'chunks'], 'readwrite', function (tx) {
+      tx.objectStore('recs').delete(rid);
+      var c = tx.objectStore('chunks').index('rid').openKeyCursor(IDBKeyRange.only(rid));
+      c.onsuccess = function () { var cur2 = c.result; if (cur2) { tx.objectStore('chunks').delete(cur2.primaryKey); cur2.continue(); } };
+    }).catch(function () {});
+  }
+
+  /* ---- the recorder (one at a time, keeps going if you move between pages) ---- */
+  var REC = null, UP = {}, recTick = null, recWake = null;
+  function recElapsed() { if (!REC) return 0; return Math.floor((REC.acc + (REC.paused ? 0 : Date.now() - REC.t0)) / 1000); }
+  function pickMime() {
+    var c = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac', 'audio/ogg;codecs=opus'];
+    for (var i = 0; i < c.length; i++) { try { if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c[i])) return c[i]; } catch (e) {} }
+    return '';
+  }
+  function extFor(mime) { mime = String(mime || ''); return /mp4|aac|m4a/.test(mime) ? 'm4a' : /ogg/.test(mime) ? 'ogg' : /mpeg|mp3/.test(mime) ? 'mp3' : /wav/.test(mime) ? 'wav' : 'webm'; }
+  function stampName() { var d = new Date(); function p(n) { return String(n).padStart(2, '0'); } return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()); }
+  function holdWake() {
+    if (!('wakeLock' in navigator) || recWake) return;
+    navigator.wakeLock.request('screen').then(function (l) { recWake = l; l.addEventListener('release', function () { recWake = null; }); }, function () {});
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && REC) { holdWake(); paintRecAll(); }
+  });
+  window.addEventListener('beforeunload', function (e) {
+    if (REC || Object.keys(UP).length) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  function recStart(sid) {
+    if (REC) { toast('فيه تسجيل شغال'); return; }
+    if (!recSupported()) { toast('المتصفح هذا ما يدعم التسجيل، ارفع ملف بدلها'); return; }
+    var sheikh = (cur && cur.sid === sid && cur.meta && cur.meta.sheikh) || '';
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 } }).then(function (stream) {
+      var mime = pickMime(), opts = { audioBitsPerSecond: 48000 }, mr;
+      if (mime) opts.mimeType = mime;
+      try { mr = new MediaRecorder(stream, opts); } catch (e) { mr = new MediaRecorder(stream); }
+      var rid = newId();
+      REC = { rid: rid, sid: sid, sheikh: sheikh, mr: mr, stream: stream, chunks: [], seq: 0, mime: mr.mimeType || mime || 'audio/webm', t0: Date.now(), acc: 0, paused: false, started: Date.now() };
+      var meta = { rid: rid, uid: me && me.id, sid: sid, sheikh: sheikh, mime: REC.mime, started: REC.started, seconds: 0 };
+      idbPutRec(meta);
+      mr.ondataavailable = function (e) {
+        if (!e.data || !e.data.size || !REC || REC.rid !== rid) return;
+        REC.chunks.push(e.data); idbAddChunk(rid, REC.seq++, e.data);
+        meta.seconds = recElapsed(); idbPutRec(meta);
+      };
+      mr.onstop = function () { recFinish(rid, meta); };
+      mr.onerror = function () { toast('صار خطأ في التسجيل، حفظت اللي تسجّل'); recStop(); };
+      stream.getAudioTracks().forEach(function (t) { t.addEventListener('ended', function () { if (REC && REC.rid === rid) { toast('انقطع الميكروفون، حفظت اللي تسجّل'); recStop(); } }); });
+      mr.start(5000);
+      holdWake();
+      clearInterval(recTick); recTick = setInterval(paintRecTime, 1000);
+      paintRecAll();
+      toast('بدأ التسجيل');
+    }, function (err) {
+      toast(err && err.name === 'NotAllowedError' ? 'لازم تسمح للموقع يستخدم الميكروفون من إعدادات المتصفح' : 'ما قدرت أشغّل الميكروفون');
+    });
+  }
+  function recPause() {
+    if (!REC) return;
+    try {
+      if (REC.paused) { REC.mr.resume(); REC.paused = false; REC.t0 = Date.now(); }
+      else { REC.mr.pause(); REC.acc += Date.now() - REC.t0; REC.paused = true; }
+    } catch (e) {}
+    paintRecAll();
+  }
+  function recStop() {
+    if (!REC || REC.stopping) return;
+    REC.stopping = true;
+    if (!REC.paused) { REC.acc += Date.now() - REC.t0; REC.paused = true; }
+    try { if (REC.mr.state !== 'inactive') REC.mr.stop(); else recFinish(REC.rid, null); } catch (e) { recFinish(REC.rid, null); }
+  }
+  function recFinish(rid, meta) {
+    if (!REC || REC.rid !== rid) return;
+    var r = REC; REC = null;
+    clearInterval(recTick); recTick = null;
+    try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    if (recWake) { try { recWake.release(); } catch (e) {} recWake = null; }
+    var seconds = Math.floor(r.acc / 1000);
+    var blob = new Blob(r.chunks, { type: r.mime.split(';')[0] || 'audio/webm' });
+    paintRecAll();
+    if (!blob.size) { idbDel(rid); toast('التسجيل فاضي'); return; }
+    if (meta) { meta.seconds = seconds; meta.done = true; idbPutRec(meta); }
+    uploadRec(r.sid, blob, { file: 'majlis-' + stampName() + '.' + extFor(r.mime), display: 'تسجيل ' + fmtClockShort(r.started), seconds: seconds, rid: rid })
+      .then(null, function () {});
+  }
+  function fmtClockShort(t) {
+    try { return new Date(t).toLocaleString('ar-SA-u-ca-gregory-nu-arab', { day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; }
+  }
+
+  function uploadRec(sid, blob, info) {
+    UP[sid] = { pct: 0, name: info.display };
+    paintRecAll();
+    return api('/api/rec', { op: 'prepare', majlisId: sid, size: blob.size }).then(function (p) {
+      return blobLib().then(function (lib) {
+        var type = String(blob.type || '').split(';')[0];
+        return lib.upload(p.prefix + info.file, blob, {
+          access: p.access || 'private', handleUploadUrl: '/api/upload',
+          clientPayload: JSON.stringify({ kind: 'rec', majlisId: sid, size: blob.size }),
+          multipart: blob.size > 8 * 1024 * 1024, contentType: type || undefined,
+          onUploadProgress: function (e) { if (UP[sid]) { UP[sid].pct = Math.round(e.percentage || 0); paintUp(sid); } }
+        });
+      });
+    }).then(function (res) {
+      return api('/api/rec', { op: 'add', majlisId: sid, url: res.url, pathname: res.pathname, size: blob.size, seconds: info.seconds || 0, mime: String(blob.type || '').split(';')[0], name: info.display });
+    }).then(function (j) {
+      delete UP[sid];
+      if (info.rid) idbDel(info.rid);
+      toast('انرفع التسجيل');
+      if (view === 'session' && cur && cur.sid === sid) loadRecs(sid);
+      paintRecAll();
+      return j;
+    }, function (e) {
+      delete UP[sid];
+      paintRecAll();
+      var msg = (e && e.message) || 'ما انرفع';
+      toast(info.rid ? 'ما انرفع التسجيل، بس محفوظ في جهازك وتقدر ترفعه بعدين' : msg);
+      if (view === 'session' && cur && cur.sid === sid) { var el = document.getElementById('recErr'); if (el) el.textContent = msg; renderLeftovers(sid); }
+      throw e;
+    });
+  }
+  function fileDuration(file) {
+    return new Promise(function (res) {
+      var done = false, a = document.createElement('audio'), url = URL.createObjectURL(file);
+      function end(v) { if (done) return; done = true; URL.revokeObjectURL(url); res(v); }
+      a.preload = 'metadata';
+      a.onloadedmetadata = function () { end(isFinite(a.duration) ? Math.round(a.duration) : 0); };
+      a.onerror = function () { end(0); };
+      setTimeout(function () { end(0); }, 5000);
+      a.src = url;
+    });
+  }
+
+  /* ---- painting ---- */
+  function paintRecAll() { paintRecFloat(); if (view === 'session' && cur) paintRecPanel(cur.sid); }
+  function paintRecTime() {
+    var t = fmtClock(recElapsed());
+    var a = document.getElementById('recTime'); if (a) a.textContent = t;
+    var f = document.getElementById('recFloatT'); if (f) f.textContent = t;
+  }
+  function paintRecFloat() {
+    var f = document.getElementById('recFloat');
+    if (!REC) { if (f) f.remove(); return; }
+    if (!f) {
+      f = document.createElement('a'); f.id = 'recFloat'; f.className = 'rec-float';
+      document.body.appendChild(f);
+    }
+    f.href = '#s-' + REC.sid;
+    f.onclick = function () { setTimeout(function () { var s = document.getElementById('sec-rec'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 400); };
+    f.innerHTML = '<span class="rec-dot' + (REC.paused ? ' paused' : '') + '" aria-hidden="true"></span><span>' + (REC.paused ? 'التسجيل موقّف' : 'يسجّل') + '</span><b id="recFloatT">' + fmtClock(recElapsed()) + '</b>' +
+      (REC.sheikh ? '<span class="rec-who">' + esc(REC.sheikh) + '</span>' : '');
+  }
+  function paintUp(sid) {
+    var b = document.getElementById('recUpBar'), t = document.getElementById('recUpPct');
+    if (b && UP[sid]) b.style.width = UP[sid].pct + '%';
+    if (t && UP[sid]) t.textContent = ar(UP[sid].pct) + '٪';
+  }
+  function recSectionHtml() {
+    if (!recAllowed()) return '';
+    return '<section class="sec" id="sec-rec" aria-labelledby="h-rec"><div class="sec-head"><h2 id="h-rec">التسجيل والتفريغ</h2></div>' +
+      '<p class="lede">سجّل المجلس من هنا أو ارفع تسجيل عندك. بعدها يفرّغه الموقع، ويوزّع أجوبة الشيخ على أسئلتك، ويطلّع التوجيهات والكتب، وأنت تختار وش ينضاف للجلسة.</p>' +
+      '<div class="rec-panel" id="recPanel"></div><p class="login-err" id="recErr" role="alert"></p>' +
+      '<div id="recLeft"></div><div class="rec-list" id="recList"></div>' +
+      '<input type="file" id="recFile" accept="audio/*,video/*,.m4a,.mp3,.ogg,.opus,.wav,.aac,.amr,.webm" hidden></section>';
+  }
+  function paintRecPanel(sid) {
+    var el = document.getElementById('recPanel'); if (!el) return;
+    if (ai && !ai.store) {
+      el.innerHTML = '<p class="rich-empty">' + (ai.admin ? 'التسجيل يحتاج مخزن الملفات: من Vercel افتح Storage ← Create ← Blob (خلّه Private) واربطه بالمشروع.' : 'التسجيل غير مفعّل في الموقع بعد.') + '</p>';
+      return;
+    }
+    if (UP[sid]) {
+      el.innerHTML = '<div class="rec-up"><span>يرفع «' + esc(UP[sid].name) + '»</span><b id="recUpPct">' + ar(UP[sid].pct) + '٪</b>' +
+        '<div class="rec-bar"><i id="recUpBar" style="width:' + UP[sid].pct + '%"></i></div><span class="hint">خلّ الصفحة مفتوحة لين يخلص الرفع.</span></div>';
+      return;
+    }
+    if (REC && REC.sid === sid) {
+      el.innerHTML = '<div class="rec-live' + (REC.paused ? ' paused' : '') + '"><span class="rec-dot" aria-hidden="true"></span><b class="rec-time" id="recTime">' + fmtClock(recElapsed()) + '</b>' +
+        '<span class="rec-state">' + (REC.paused ? 'موقّف مؤقتًا' : 'يسجّل الحين') + '</span>' +
+        '<div class="btns"><button class="btn" type="button" data-rec="pause">' + (REC.paused ? 'كمّل التسجيل' : 'إيقاف مؤقت') + '</button>' +
+        '<button class="btn primary" type="button" data-rec="stop">إنهاء وحفظ</button></div>' +
+        '<span class="hint">خلّ الصفحة مفتوحة والشاشة شغالة. التسجيل ينحفظ في جهازك أول بأول، وينرفع بعد ما تنهيه. تقدر تتنقل بين أقسام الموقع والتسجيل شغال.</span></div>';
+      return;
+    }
+    var other = REC && REC.sid !== sid;
+    el.innerHTML = '<div class="btns">' +
+      (recSupported() ? '<button class="btn primary" type="button" data-rec="start"' + (other ? ' disabled' : '') + '><span class="rec-dot" aria-hidden="true"></span> ابدأ التسجيل</button>' : '') +
+      '<button class="btn" type="button" data-rec="file">ارفع ملف صوتي</button></div>' +
+      (other ? '<p class="hint">فيه تسجيل شغال لمجلس ثاني، أنهه أول.</p>' : '') +
+      (recSupported() ? '' : '<p class="hint">المتصفح هذا ما يدعم التسجيل المباشر، سجّل بتطبيق التسجيل في جوالك وارفع الملف.</p>');
+  }
+
+  /* ---- recordings list for the open session ---- */
+  var recState = { sid: null, recs: [], flags: {}, busy: {}, pollT: null, texts: {} };
+  function loadRecs(sid) {
+    if (!recAllowed() || !document.getElementById('recList')) return;
+    api('/api/rec', { op: 'list', majlisId: sid }).then(function (j) {
+      if (!cur || cur.sid !== sid) return;
+      recState.sid = sid; recState.recs = j.recs || []; recState.flags = j;
+      renderRecs(); schedulePoll();
+    }, function () {});
+    renderLeftovers(sid);
+  }
+  function renderLeftovers(sid) {
+    var box = document.getElementById('recLeft'); if (!box) return;
+    idbList().then(function (l) {
+      if (!cur || cur.sid !== sid) return;
+      var left = l.filter(function (r) { return r.sid === sid && (!REC || REC.rid !== r.rid) && !UP[sid]; });
+      box.innerHTML = left.map(function (r) {
+        return '<div class="rec-left" data-lrid="' + esc(r.rid) + '"><span>تسجيل محفوظ في جهازك وما انرفع' + (r.seconds ? ' (' + fmtDur(r.seconds) + ')' : '') + ' — ' + esc(fmtClockShort(r.started)) + '</span>' +
+          '<div class="btns"><button class="btn primary" type="button" data-left="up">ارفعه الحين</button><button class="btn ghost" type="button" data-left="del">احذفه</button></div></div>';
+      }).join('');
+    });
+  }
+  function statusHtml(r) {
+    var f = recState.flags || {};
+    if (r.gone) return '<p class="hint">الملف الصوتي محذوف' + (r.hasText ? '، والتفريغ موجود.' : '.') + '</p>';
+    switch (r.status) {
+      case 'transcribing': return '<p class="rec-st run"><span class="spin" aria-hidden="true"></span>يفرّغ الصوت… عادة ياخذ دقايق قليلة، وتقدر تطلع من الصفحة وترجع.</p>';
+      case 'summarizing': return '<p class="rec-st run"><span class="spin" aria-hidden="true"></span>يقرأ التفريغ ويوزّع كلام الشيخ على أسئلتك… ياخذ من دقيقة إلى أربع.</p>';
+      case 'transcribed': return '<p class="rec-st">التفريغ جاهز.' + (r.error ? ' <span class="login-err">' + esc(r.error) + '</span>' : '') + '</p>';
+      case 'ready': return '<p class="rec-st ok">جاهز، راجع اللي طلع تحت واختر وش ينضاف.</p>';
+      case 'applied': return '<p class="rec-st ok">انضاف للجلسة.</p>';
+      case 'error': return '<p class="login-err">' + esc(r.error || 'صار خطأ') + '</p>';
+      default: return f.asr ? '' : '<p class="hint">' + (ai && ai.admin ? 'التفريغ يحتاج مفتاح AssemblyAI في Vercel باسم ASSEMBLYAI_API_KEY.' : 'التفريغ غير مفعّل في الموقع بعد.') + '</p>';
+    }
+  }
+  function actionsHtml(r) {
+    var f = recState.flags || {}, b = [];
+    var busy = recState.busy[r.id];
+    if (!r.gone && f.asr && (r.status === 'uploaded' || r.status === 'error')) b.push('<button class="btn primary" type="button" data-ra="asr"' + (busy ? ' disabled' : '') + '>' + (r.status === 'error' ? 'أعد التفريغ' : 'فرّغ ولخّص') + '</button>');
+    if (r.status === 'transcribed' && f.ai) b.push('<button class="btn primary" type="button" data-ra="sum"' + (busy ? ' disabled' : '') + '>لخّص ووزّع على الأسئلة</button>');
+    if (r.hasText) b.push('<button class="btn" type="button" data-ra="text" aria-expanded="' + (recState.texts[r.id] ? 'true' : 'false') + '">' + (recState.texts[r.id] ? 'إخفاء التفريغ' : 'عرض التفريغ') + '</button>');
+    if (r.play) b.push('<a class="btn ghost" href="' + esc(r.play) + '" download target="_blank" rel="noopener">تنزيل الصوت</a>');
+    b.push('<button class="btn ghost" type="button" data-ra="del">حذف</button>');
+    return '<div class="btns">' + b.join('') + '</div>';
+  }
+  function previewHtml(r) {
+    var s = r.summary; if (!s || r.status !== 'ready') return '';
+    var out = ['<div class="rec-prev"><h3>اللي طلع من التسجيل</h3><p class="hint">علّم على اللي تبيه ينضاف للجلسة. الأوقات بجانب الأجوبة تشغّل التسجيل من مكان الجواب.</p>'];
+    if (s.summary) out.push('<label class="pick"><input type="checkbox" data-pk="summary" checked><b>ملخص المجلس</b> <span class="hint">ينضاف لـ «فوائد وأفكار للتطبيق»</span></label><div class="rich pick-body">' + md(s.summary) + '</div>');
+    if ((s.answers || []).length) {
+      out.push('<h4>أجوبة أسئلتك (' + ar(s.answers.length) + ')</h4>');
+      s.answers.forEach(function (a) {
+        var q = cur && cur.qs[a.qid], had = q && (q.answer || '').trim();
+        out.push('<label class="pick"><input type="checkbox" data-pk="a" value="' + esc(a.qid) + '" checked><b>' + esc(q ? q.text : 'سؤال') + '</b>' + tsBtn(a.at) + '</label>' +
+          '<div class="rich pick-body">' + md(a.answer) + '</div>' + (had ? '<p class="hint pick-body">عندك جواب مكتوب لهذا السؤال، الجديد بينضاف تحته.</p>' : ''));
+      });
+    }
+    if ((s.extra || []).length) {
+      out.push('<h4>أسئلة انسألت وما كانت في قائمتك (' + ar(s.extra.length) + ')</h4>');
+      s.extra.forEach(function (x, i) {
+        out.push('<label class="pick"><input type="checkbox" data-pk="e" value="' + i + '" checked><b>' + esc(x.q) + '</b>' + tsBtn(x.at) + '</label><div class="rich pick-body">' + md(x.answer) + '</div>');
+      });
+    }
+    if ((s.guidance || []).length) out.push('<h4>توجيهات الشيخ</h4><label class="pick"><input type="checkbox" data-pk="guidance" checked><b>أضف التوجيهات (' + ar(s.guidance.length) + ')</b></label><ul class="pick-body plain">' + s.guidance.map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('') + '</ul>');
+    if ((s.books || []).length) out.push('<h4>الكتب اللي ذكرها</h4><label class="pick"><input type="checkbox" data-pk="books" checked><b>أضف الكتب (' + ar(s.books.length) + ')</b></label><ul class="pick-body plain">' + s.books.map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('') + '</ul>');
+    if (!s.summary && !(s.answers || []).length && !(s.extra || []).length) out.push('<p class="rich-empty">ما لقيت في التسجيل أجوبة واضحة للشيخ.</p>');
+    out.push('<div class="btns"><button class="btn primary" type="button" data-ra="apply">أضف المحدد للجلسة</button><button class="btn ghost" type="button" data-ra="dismiss">تجاهل</button></div></div>');
+    return out.join('');
+  }
+  function tsBtn(at) { return atSecs(at) >= 0 ? ' <button class="ts" type="button" data-at="' + esc(at) + '" title="شغّل من هنا">' + ar(at) + '</button>' : ''; }
+  function renderRecs() {
+    var el = document.getElementById('recList'); if (!el) return;
+    var playing = {};
+    el.querySelectorAll('.rec-card audio').forEach(function (a) { var id = a.closest('.rec-card').dataset.rec; playing[id] = { t: a.currentTime, p: !a.paused }; });
+    el.innerHTML = recState.recs.map(function (r) {
+      var meta = [fmtClockShort(r.createdAt), fmtDur(r.seconds), r.size ? fmtSize(r.size) : ''].filter(Boolean).join('، ');
+      return '<div class="rec-card" data-rec="' + esc(r.id) + '"><div class="rec-head"><b>' + esc(r.name || 'تسجيل') + '</b><span class="u-sub">' + esc(meta) + '</span></div>' +
+        (r.play ? '<audio controls preload="none" src="' + esc(r.play) + '"></audio>' : '') +
+        statusHtml(r) + actionsHtml(r) +
+        (recState.texts[r.id] ? '<div class="rec-text"><div class="btns"><button class="btn" type="button" data-ra="copyText">نسخ التفريغ</button><button class="btn" type="button" data-ra="dlText">تنزيل نص</button></div><div class="rec-text-body">' + esc(recState.texts[r.id]) + '</div></div>' : '') +
+        previewHtml(r) + '</div>';
+    }).join('');
+    Object.keys(playing).forEach(function (id) {
+      var a = el.querySelector('.rec-card[data-rec="' + id + '"] audio');
+      if (a && playing[id].t) { try { a.currentTime = playing[id].t; } catch (e) {} if (playing[id].p) a.play().catch(function () {}); }
+    });
+  }
+  function recById(id) { return recState.recs.filter(function (r) { return r.id === id; })[0]; }
+  function putRec(r) {
+    var i = recState.recs.findIndex(function (x) { return x.id === r.id; });
+    if (i === -1) recState.recs.push(r); else { if (!r.play && recState.recs[i].play) r.play = recState.recs[i].play; recState.recs[i] = r; }
+  }
+  function schedulePoll() {
+    clearTimeout(recState.pollT);
+    var sid = recState.sid;
+    var tr = recState.recs.filter(function (r) { return r.status === 'transcribing'; });
+    var sm = recState.recs.filter(function (r) { return r.status === 'summarizing' && !recState.busy[r.id]; });
+    if (!tr.length && !sm.length) return;
+    recState.pollT = setTimeout(function () {
+      if (view !== 'session' || !cur || cur.sid !== sid) return;
+      if (sm.length && !tr.length) { loadRecs(sid); return; }
+      Promise.all(tr.map(function (r) {
+        return api('/api/rec', { op: 'poll', id: r.id }).then(function (j) {
+          putRec(j.rec);
+          if (j.rec.status === 'transcribed' && recState.flags.ai) summarizeRec(j.rec.id);
+        }, function () {});
+      })).then(function () { renderRecs(); schedulePoll(); });
+    }, sm.length && !tr.length ? 15000 : 8000);
+  }
+  function summarizeRec(id) {
+    if (recState.busy[id]) return;
+    recState.busy[id] = true;
+    var r = recById(id); if (r) { r.status = 'summarizing'; r.error = ''; }
+    renderRecs();
+    flushAll();
+    api('/api/rec', { op: 'summarize', id: id }).then(function (j) {
+      delete recState.busy[id]; putRec(j.rec); renderRecs();
+      if (j.rec.status === 'ready') toast('جهز ملخص التسجيل، راجعه في قسم التسجيل');
+    }, function (e) {
+      delete recState.busy[id];
+      if (e.status === 504 || e.status === 0) { if (cur) loadRecs(cur.sid); return; }
+      var r2 = recById(id); if (r2) { r2.status = 'transcribed'; r2.error = e.message; }
+      renderRecs();
+    });
+  }
+  function pickFrom(card) {
+    var p = { answers: [], extra: [], summary: false, guidance: false, books: false };
+    card.querySelectorAll('input[data-pk]').forEach(function (i) {
+      if (!i.checked) return;
+      var k = i.dataset.pk;
+      if (k === 'a') p.answers.push(i.value); else if (k === 'e') p.extra.push(Number(i.value)); else p[k] = true;
+    });
+    return p;
+  }
+  function wireRec(sid) {
+    var sec = document.getElementById('sec-rec'); if (!sec) return;
+    var file = document.getElementById('recFile');
+    file.addEventListener('change', function () {
+      var f = file.files && file.files[0]; file.value = '';
+      if (!f) return;
+      if (f.size > 500 * 1024 * 1024) { toast('الملف أكبر من ٥٠٠ ميجا'); return; }
+      var ext = (String(f.name).match(/\.([a-z0-9]{2,5})$/i) || [])[1] || extFor(f.type);
+      fileDuration(f).then(function (secs) {
+        uploadRec(sid, f, { file: 'upload-' + stampName() + '.' + ext.toLowerCase(), display: f.name.replace(/\.[^.]+$/, '').slice(0, 120) || 'تسجيل مرفوع', seconds: secs }).then(null, function () {});
+      });
+    });
+    sec.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      var errEl = document.getElementById('recErr');
+      if (b.dataset.rec) {
+        if (errEl) errEl.textContent = '';
+        if (b.dataset.rec === 'start') recStart(sid);
+        else if (b.dataset.rec === 'pause') recPause();
+        else if (b.dataset.rec === 'stop') recStop();
+        else if (b.dataset.rec === 'file') file.click();
+        return;
+      }
+      if (b.dataset.left) {
+        var lrid = b.closest('[data-lrid]').dataset.lrid;
+        idbList().then(function (l) {
+          var r = l.filter(function (x) { return x.rid === lrid; })[0]; if (!r) return;
+          if (b.dataset.left === 'del') {
+            if (!b.classList.contains('arm')) { b.classList.add('arm'); b.textContent = 'متأكد؟ اضغط مرة ثانية'; return; }
+            idbDel(lrid).then(function () { renderLeftovers(sid); toast('انحذف التسجيل من جهازك'); });
+            return;
+          }
+          idbBlob(r).then(function (blob) {
+            if (!blob.size) { idbDel(lrid); renderLeftovers(sid); toast('التسجيل المحفوظ فاضي'); return; }
+            document.getElementById('recLeft').innerHTML = '';
+            uploadRec(sid, blob, { file: 'majlis-' + stampName() + '.' + extFor(r.mime), display: 'تسجيل ' + fmtClockShort(r.started), seconds: r.seconds || 0, rid: r.rid }).then(null, function () {});
+          }, function () { toast('ما قدرت أقرأ التسجيل المحفوظ'); });
+        });
+        return;
+      }
+      if (b.classList.contains('ts')) {
+        var a = b.closest('.rec-card').querySelector('audio'), s = atSecs(b.dataset.at);
+        if (a && s >= 0) { a.preload = 'auto'; try { a.currentTime = s; } catch (er) {} a.play().catch(function () {}); a.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        e.preventDefault();
+        return;
+      }
+      var card = b.closest('.rec-card'); if (!card || !b.dataset.ra) return;
+      var id = card.dataset.rec, r = recById(id); if (!r) return;
+      var ra = b.dataset.ra;
+      if (ra === 'asr') {
+        recState.busy[id] = true; renderRecs();
+        api('/api/rec', { op: 'transcribe', id: id }).then(function (j) { delete recState.busy[id]; putRec(j.rec); renderRecs(); schedulePoll(); toast('بدأ التفريغ'); },
+          function (er) { delete recState.busy[id]; renderRecs(); toast(er.message); });
+      } else if (ra === 'sum') summarizeRec(id);
+      else if (ra === 'text') {
+        if (recState.texts[id]) { delete recState.texts[id]; renderRecs(); return; }
+        api('/api/rec', { op: 'transcript', id: id }).then(function (j) { recState.texts[id] = j.text || 'ما فيه نص'; renderRecs(); }, function (er) { toast(er.message); });
+      } else if (ra === 'copyText') {
+        (navigator.clipboard ? navigator.clipboard.writeText(recState.texts[id] || '') : Promise.reject()).then(function () { toast('انتسخ التفريغ'); }, function () { toast('ما قدرت أنسخ'); });
+      } else if (ra === 'dlText') {
+        var blob = new Blob(['﻿' + (recState.texts[id] || '')], { type: 'text/plain;charset=utf-8' });
+        var u = URL.createObjectURL(blob), lk = document.createElement('a');
+        lk.href = u; lk.download = 'majlis-transcript-' + (cur && cur.meta && cur.meta.date || stampName()) + '.txt'; document.body.appendChild(lk); lk.click(); lk.remove();
+        setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+      } else if (ra === 'del') {
+        if (!b.classList.contains('arm')) { b.classList.add('arm'); b.textContent = 'متأكد؟ يحذف الصوت والتفريغ'; return; }
+        api('/api/rec', { op: 'del', id: id }).then(function () {
+          recState.recs = recState.recs.filter(function (x) { return x.id !== id; }); delete recState.texts[id]; renderRecs(); toast('انحذف التسجيل');
+        }, function (er) { toast(er.message); });
+      } else if (ra === 'apply' || ra === 'dismiss') {
+        var p = ra === 'apply' ? pickFrom(card) : {};
+        b.disabled = true;
+        flushAll();
+        api('/api/rec', { op: 'apply', id: id, pick: p }).then(function (j) {
+          r.status = 'applied'; r.summary = null; renderRecs();
+          if (ra === 'apply') {
+            var parts = [];
+            if (j.answers) parts.push(j.answers === 1 ? 'جواب واحد' : j.answers === 2 ? 'جوابين' : ar(j.answers) + ' أجوبة');
+            if (j.extra) parts.push(j.extra === 1 ? 'سؤال جديد' : j.extra === 2 ? 'سؤالين جداد' : ar(j.extra) + ' أسئلة جديدة');
+            if (j.notes) parts.push('الفوائد');
+            if (j.books) parts.push('الكتب');
+            toast(parts.length ? 'انضاف للجلسة: ' + parts.join('، ') : 'ما انضاف شي');
+            loadSession(cur.sid, false);
+          }
+        }, function (er) { b.disabled = false; toast(er.message); });
+      }
+    });
+  }
+
+  /* ---- home: remind about recordings that stayed on this device ---- */
+  function homeLeftovers() {
+    if (!recAllowed()) return;
+    idbList().then(function (l) {
+      var left = l.filter(function (r) { return (!REC || REC.rid !== r.rid) && !UP[r.sid]; });
+      var main = document.querySelector('.home-main'); if (!left.length || !main || view !== 'home') return;
+      var box = document.createElement('div'); box.className = 'rec-left';
+      box.innerHTML = '<span>عندك ' + (left.length === 1 ? 'تسجيل محفوظ' : ar(left.length) + ' تسجيلات محفوظة') + ' في جهازك وما انرفع' + (left[0].sheikh ? ' (مجلس ' + esc(left[0].sheikh) + ')' : '') + '.</span>' +
+        '<div class="btns"><a class="btn primary" href="#s-' + esc(left[0].sid) + '">افتح الجلسة وارفعه</a></div>';
+      main.insertBefore(box, main.firstChild);
+    });
+  }
+
+  /* ================= BACKUPS (admin) ================= */
+  var KIND = { auto: 'تلقائية', manual: 'يدوية', 'pre-restore': 'قبل استرجاع', upload: 'ملف مرفوع' };
+  function fmtWhen(iso) {
+    try { return new Date(iso).toLocaleString('ar-SA-u-ca-gregory-nu-arab', { timeZone: 'Asia/Riyadh', weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }); } catch (e) { return iso; }
+  }
+  function countsLine(c) {
+    c = c || {};
+    return [ar(c.users || 0) + ' مستخدم', ar(c.majalis || 0) + ' جلسة', ar(c.questions || 0) + ' سؤال'].join('، ');
+  }
+  var bk = { users: [] };
+  function loadBackups() {
+    var body = document.getElementById('bkBody'); if (!body) return;
+    api('/api/backup', { op: 'status' }).then(function (j) {
+      if (view !== 'admin') return;
+      bk.users = j.users || [];
+      var st = document.getElementById('bkState');
+      if (!j.ready) {
+        st.textContent = 'غير مفعّل'; st.classList.add('off');
+        body.innerHTML = '<p class="rich-empty">يحتاج مخزن الملفات: من Vercel افتح مشروعك ← Storage ← Create ← Blob ← خلّه Private ← Create ← Connect. بعدها يبدأ النسخ التلقائي كل ليلة.</p>';
+        return;
+      }
+      st.classList.remove('off');
+      var last = (j.log || [])[0];
+      st.textContent = last ? 'آخر نسخة: ' + fmtWhen(last.at) : 'ما فيه نسخ بعد';
+      var s = j.storage || { total: 0, quota: 1, recBytes: 0, backupBytes: 0 };
+      var pct = Math.min(100, Math.round(s.total / s.quota * 100));
+      body.innerHTML =
+        '<div class="meter"><div class="meter-line"><span>المساحة المستخدمة</span><b>' + fmtSize(s.total) + ' من ' + fmtSize(s.quota) + '</b></div>' +
+        '<div class="rec-bar' + (pct >= 70 ? ' warn' : '') + '"><i style="width:' + Math.max(1, pct) + '%"></i></div>' +
+        '<span class="hint">التسجيلات ' + fmtSize(s.recBytes) + '، والنسخ الاحتياطية ' + fmtSize(s.backupBytes) + '. إذا وصلت ٨٥٪ يوقف رفع التسجيلات، فاحذف تسجيلات قديمة بعد تفريغها.</span></div>' +
+        '<div class="btns"><button class="btn primary" type="button" id="bkNow">خذ نسخة الحين</button><button class="btn" type="button" id="bkFileBtn">استرجاع من ملف</button>' +
+        '<input type="file" id="bkFile" accept=".gz,.json,application/gzip,application/json" hidden></div>' +
+        '<div id="bkMsg" class="hint" role="status"></div>' +
+        '<div class="bk-list">' + ((j.log || []).length ? j.log.map(function (e) {
+          return '<div class="bk-row" data-bk="' + esc(e.id) + '"><div class="u-main"><div class="u-line"><b>' + esc(fmtWhen(e.at)) + '</b><span class="chip">' + esc(KIND[e.kind] || e.kind) + '</span></div>' +
+            '<span class="u-sub">' + countsLine(e.counts) + '، الحجم ' + fmtSize(e.size) + '</span></div>' +
+            '<div class="btns"><button class="btn" type="button" data-bk-act="dl">تنزيل</button><button class="btn" type="button" data-bk-act="restore">استرجاع</button></div>' +
+            '<div class="bk-restore" hidden></div></div>';
+        }).join('') : '<p class="empty">أول نسخة تلقائية الليلة الساعة ٣ الفجر، أو خذ نسخة الحين.</p>') + '</div>';
+      wireBackups();
+    }, function (e) { body.innerHTML = '<p class="login-err">' + esc(e.message) + '</p>'; });
+  }
+  function restoreFormHtml() {
+    return '<div class="field"><label>وش ترجّع؟</label><select class="input" data-r="user"><option value="">كل المستخدمين</option>' +
+      bk.users.map(function (u) { return '<option value="' + esc(u.id) + '">' + esc(u.name) + ' (@' + esc(u.username) + ')</option>'; }).join('') + '</select></div>' +
+      '<label class="pick"><input type="radio" name="rmode" value="missing" checked><span><b>رجّع المحذوف بس</b> (الأسلم): يرجّع الجلسات والأسئلة والحسابات اللي انحذفت بعد وقت النسخة، وما يلمس شي موجود.</span></label>' +
+      '<label class="pick"><input type="radio" name="rmode" value="all"><span><b>رجّع كل شي مثل ما كان وقتها</b>: يرجّع المحذوف، ويرجّع أي تعديل صار بعد النسخة لحالته القديمة. اللي انضاف بعدها يبقى.</span></label>' +
+      '<p class="hint">قبل الاسترجاع ياخذ الموقع نسخة من الوضع الحالي، عشان لو تبي ترجع عن الاسترجاع.</p>' +
+      '<div class="btns"><button class="btn primary" type="button" data-r="go">استرجع</button><button class="btn ghost" type="button" data-r="cancel">إلغاء</button></div><p class="hint" data-r="out" role="status"></p>';
+  }
+  function runRestore(box, src) {
+    var go = box.querySelector('[data-r=go]'), out = box.querySelector('[data-r=out]');
+    var mode = (box.querySelector('input[name=rmode]:checked') || {}).value || 'missing';
+    var body = { op: 'restore', mode: mode, userId: box.querySelector('[data-r=user]').value || null };
+    Object.keys(src).forEach(function (k) { body[k] = src[k]; });
+    if (!go.classList.contains('arm')) { go.classList.add('arm'); go.textContent = 'متأكد؟ اضغط مرة ثانية'; return; }
+    go.disabled = true; out.textContent = 'جاري الاسترجاع… لا تقفل الصفحة';
+    api('/api/backup', body).then(function (j) {
+      var r = j.res || {};
+      var parts = [];
+      if (r.users) parts.push(ar(r.users) + ' حساب');
+      if (r.majalis) parts.push(ar(r.majalis) + ' جلسة');
+      if (r.questions) parts.push(ar(r.questions) + ' سؤال');
+      if (r.recordings) parts.push(ar(r.recordings) + ' تسجيل');
+      if (r.updated) parts.push('ورجّع ' + ar(r.updated) + ' تعديل');
+      toast('تم الاسترجاع');
+      loadBackups();
+      setTimeout(function () { var m = document.getElementById('bkMsg'); if (m) m.textContent = 'تم الاسترجاع: ' + (parts.length ? 'رجع ' + parts.join('، ') : 'ما فيه شي ناقص، كل شي موجود') + (r.skipped ? '. وتخطى ' + ar(r.skipped) + ' عنصر ما يمديه يرجع.' : '.'); }, 300);
+      loadUsers();
+    }, function (e) { go.disabled = false; go.classList.remove('arm'); go.textContent = 'استرجع'; out.textContent = e.message; });
+  }
+  function wireBackups() {
+    var now = document.getElementById('bkNow');
+    if (now) now.addEventListener('click', function () {
+      now.disabled = true; now.textContent = 'ياخذ نسخة…';
+      api('/api/backup', { op: 'now' }).then(function () { toast('انحفظت نسخة احتياطية'); loadBackups(); }, function (e) { now.disabled = false; now.textContent = 'خذ نسخة الحين'; toast(e.message); });
+    });
+    var fileBtn = document.getElementById('bkFileBtn'), file = document.getElementById('bkFile');
+    if (fileBtn) fileBtn.addEventListener('click', function () { file.click(); });
+    if (file) file.addEventListener('change', function () {
+      var f = file.files && file.files[0]; file.value = ''; if (!f) return;
+      var msg = document.getElementById('bkMsg'); msg.textContent = 'يرفع الملف…';
+      api('/api/rec', { op: 'prepare', kind: 'backup', size: f.size }).then(function (p) {
+        return blobLib().then(function (lib) {
+          return lib.upload(p.prefix + 'majalis-upload-' + stampName() + (/\.gz$/i.test(f.name) ? '.json.gz' : '.json'), f, { access: p.access || 'private', handleUploadUrl: '/api/upload', clientPayload: JSON.stringify({ kind: 'backup', size: f.size }), contentType: /\.gz$/i.test(f.name) ? 'application/gzip' : 'application/json' });
+        });
+      }).then(function (res) {
+        msg.innerHTML = '';
+        var box = document.createElement('div'); box.className = 'bk-restore'; box.innerHTML = '<p><b>استرجاع من «' + esc(f.name) + '»</b></p>' + restoreFormHtml();
+        msg.appendChild(box);
+        box.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-r]'); if (!b) return;
+          if (b.dataset.r === 'cancel') { msg.innerHTML = ''; return; }
+          if (b.dataset.r === 'go') runRestore(box, { url: res.url, pathname: res.pathname, size: f.size });
+        });
+      }, function (e) { msg.textContent = e.message || 'ما انرفع الملف'; });
+    });
+    document.querySelectorAll('.bk-row').forEach(function (row) {
+      row.addEventListener('click', function (e) {
+        var b = e.target.closest('button'); if (!b) return;
+        var id = row.dataset.bk, box = row.querySelector('.bk-restore');
+        if (b.dataset.bkAct === 'dl') {
+          b.disabled = true;
+          api('/api/backup', { op: 'link', id: id }).then(function (j) { b.disabled = false; window.open(j.url, '_blank', 'noopener'); }, function (er) { b.disabled = false; toast(er.message); });
+        } else if (b.dataset.bkAct === 'restore') {
+          box.hidden = !box.hidden;
+          if (!box.hidden) box.innerHTML = restoreFormHtml();
+        } else if (b.dataset.r === 'cancel') { box.hidden = true; }
+        else if (b.dataset.r === 'go') runRestore(box, { id: id });
+      });
+    });
+  }
 
   boot();
 })();

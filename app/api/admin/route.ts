@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { cleanUsername, fail, handle, requireUser } from "@/lib/auth";
 import { dailyLimit } from "@/lib/limits";
 import { intlPhone, saveWa, smartLogin, waCfg, waSend } from "@/lib/wa";
+import { delRecordingFiles } from "@/lib/blob";
 export const dynamic = "force-dynamic";
 
 async function requireAdmin() {
@@ -119,6 +120,10 @@ export async function POST(req: Request) {
     if (b.op === "deleteUsers" || b.op === "approveMany") {
       const ids = Array.isArray(b.ids) ? b.ids.map(String).slice(0, 500) : [];
       const where = { id: { in: ids }, role: { not: "admin" } };
+      if (b.op === "deleteUsers") {
+        const del = await prisma.user.findMany({ where, select: { id: true } });
+        await delRecordingFiles({ userId: { in: del.map((u) => u.id) } });
+      }
       const r = b.op === "deleteUsers" ? await prisma.user.deleteMany({ where }) : await prisma.user.updateMany({ where, data: { approved: true } });
       return { n: r.count };
     }
@@ -126,6 +131,7 @@ export async function POST(req: Request) {
       const u = await prisma.user.findUnique({ where: { id: String(b.id || "") } });
       if (!u) fail("ما لقيت المستخدم", 404);
       if (u!.role === "admin") fail("ما تقدر تحذف حساب مدير");
+      await delRecordingFiles({ userId: u!.id });
       await prisma.user.delete({ where: { id: u!.id } });
       return { ok: true };
     }

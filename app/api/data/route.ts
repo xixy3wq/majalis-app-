@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { fail, handle, requireUser } from "@/lib/auth";
 import { aiReady } from "@/lib/claude";
+import { blobReady } from "@/lib/blob";
+import { asrReady } from "@/lib/asr";
 import { dailyLimit, usedToday } from "@/lib/limits";
 export const dynamic = "force-dynamic";
 
@@ -21,7 +23,7 @@ export async function GET() {
     return {
       me: { id: me.id, name: me.name, role: me.role, about: me.about },
       pending,
-      ai: { ready: aiReady(), allowed: me.role === "admin" || me.aiAllowed, admin: me.role === "admin", limit: me.role === "admin" ? null : await dailyLimit(), used: await usedToday(me.id) },
+      ai: { ready: aiReady(), allowed: me.role === "admin" || me.aiAllowed, admin: me.role === "admin", store: blobReady(), asr: asrReady(), limit: me.role === "admin" ? null : await dailyLimit(), used: await usedToday(me.id) },
       majalis: list.map((m) => ({ id: m.id, sheikh: m.sheikh, topic: m.topic, date: m.date, place: m.place, createdAt: m.createdAt.getTime(), qCount: m._count.questions, askedCount: am[m.id] || 0 })),
     };
   });
