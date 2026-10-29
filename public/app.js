@@ -166,8 +166,12 @@
   function route() {
     if (!me) return;
     var h = (location.hash || '').slice(1);
-    if (h.indexOf('s-') === 0 && h.length > 2) openSession(h.slice(2));
+    try { h = decodeURIComponent(h); } catch (e) {}
+    if (h.indexOf('s-') === 0 && h.length > 2) { var parts = h.slice(2).split('~'); openSession(parts[0], parts[1]); }
     else if (h === 'admin' && me.role === 'admin') openAdmin();
+    else if (h === 'sheikhs') openSheikhs();
+    else if (h.indexOf('sh-') === 0) openSheikh(h.slice(3));
+    else if (h === 'library') openLibrary();
     else openHome();
   }
   window.addEventListener('hashchange', route);
@@ -241,7 +245,8 @@
       '<header class="home-top wrap"><div class="home-head"><div class="eyebrow">دفترك مع أهل العلم</div>' +
       '<div class="who"><span>' + esc(me && me.name) + '</span>' + (me && me.role === 'admin' ? '<a class="linkish" href="#admin">المستخدمون</a>' : '') + '<button class="linkish" id="logout" type="button">خروج</button></div></div>' +
       '<h1>دفتر مجالس المشايخ</h1>' +
-      '<p class="lede">سجّل كل مجلس: التحضير، والأسئلة، وأجوبة الشيخ، والفوائد. وتقدر تضيف أسئلة وتعدّلها وأنت في الجلسة.</p></header>' +
+      '<p class="lede">سجّل كل مجلس: التحضير، والأسئلة، وأجوبة الشيخ، والفوائد. وتقدر تضيف أسئلة وتعدّلها وأنت في الجلسة.</p>' +
+      tabsHtml('home') + '</header>' +
       '<main class="home-main wrap">' +
       pendingHtml() +
       aiPanelHtml() +
@@ -252,8 +257,18 @@
       '<div class="field"><label for="nf-date">التاريخ</label><input class="input" id="nf-date" type="date"></div>' +
       '<div class="field wide"><label for="nf-topic">موضوع الجلسة</label><input class="input" id="nf-topic" placeholder="وش الموضوع اللي تبي تركز عليه؟"></div>' +
       '</div><p class="login-err" id="nf-err" role="alert"></p><div class="btns"><button class="btn primary" type="submit">إنشاء الجلسة</button><button class="btn ghost" type="button" id="nfCancel">إلغاء</button></div></form>' +
-      '<div class="list" id="list"></div></main>';
+      '<div class="search-row"><label class="lbl" for="hq">بحث في جلساتك</label>' +
+      '<input class="input" id="hq" type="search" autocomplete="off" placeholder="سؤال، أو جواب، أو فائدة، أو كتاب"></div>' +
+      '<div class="list" id="hits" hidden></div>' +
+      '<div class="list" id="list"></div>' +
+      '<section class="export-row" aria-label="تنزيل جلساتك"><span class="lbl">تنزيل كل جلساتك</span><div class="btns">' +
+      '<button class="btn" type="button" id="dlAllDoc">ملف Word للقراءة</button>' +
+      '<button class="btn" type="button" id="dlAllJson">نسخة احتياطية</button></div>' +
+      '<span class="hint">النسخة الاحتياطية ملف فيه كل شيء كتبته، احفظه عندك.</span></section></main>';
     var form = document.getElementById('newForm');
+    wireSearch();
+    document.getElementById('dlAllDoc').addEventListener('click', function (e) { exportAll('doc', e.target); });
+    document.getElementById('dlAllJson').addEventListener('click', function (e) { exportAll('json', e.target); });
     document.getElementById('logout').addEventListener('click', function () {
       fetch('/api/logout', { method: 'POST' }).then(function () { location.hash = ''; showLogin(); });
     });
@@ -408,6 +423,245 @@
     });
   }
 
+  /* ================= TABS between notebook views ================= */
+  function tabsHtml(on) {
+    var T = [['home', '#', 'الجلسات'], ['sheikhs', '#sheikhs', 'المشايخ'], ['library', '#library', 'المكتبة']];
+    return '<nav class="home-tabs" aria-label="أقسام الدفتر">' + T.map(function (t) {
+      return '<a href="' + t[1] + '"' + (t[0] === on ? ' class="on" aria-current="page"' : '') + '>' + t[2] + '</a>';
+    }).join('') + '</nav>';
+  }
+  function pageTop(on, title, lede) {
+    return '<header class="home-top wrap"><div class="home-head"><div class="eyebrow">دفترك مع أهل العلم</div>' +
+      '<div class="who"><span>' + esc(me && me.name) + '</span></div></div>' +
+      '<h1>' + title + '</h1>' + (lede ? '<p class="lede">' + lede + '</p>' : '') + tabsHtml(on) + '</header>';
+  }
+
+  /* ================= ALL DATA (search, sheikhs, library, export) ================= */
+  var all = null, allP = null;
+  function loadAll(force) {
+    if (all && !force) return Promise.resolve(all);
+    if (allP && !force) return allP;
+    allP = api('/api/all').then(function (j) { all = j.majalis || []; allP = null; return all; }, function (e) { allP = null; throw e; });
+    return allP;
+  }
+  // Arabic-aware normalisation with a map back to the original text (for highlighting)
+  function normMap(src) {
+    var out = '', map = [];
+    for (var i = 0; i < src.length; i++) {
+      var c = src[i];
+      if (/[ً-ْٰـ]/.test(c)) continue;
+      if (/[إأآٱ]/.test(c)) c = 'ا'; else if (c === 'ى') c = 'ي'; else if (c === 'ة') c = 'ه'; else if (c === 'ؤ') c = 'و'; else if (c === 'ئ') c = 'ي';
+      out += c.toLowerCase(); map.push(i);
+    }
+    return { n: out, map: map };
+  }
+  function norm(s) { return normMap(String(s || '')).n; }
+  function snippet(src, q) {
+    var nm = normMap(src), k = nm.n.indexOf(q);
+    if (k < 0) return null;
+    var a = nm.map[k], b = nm.map[k + q.length - 1] + 1;
+    var from = Math.max(0, a - 60), to = Math.min(src.length, b + 90);
+    return (from > 0 ? '… ' : '') + esc(src.slice(from, a)) + '<mark>' + esc(src.slice(a, b)) + '</mark>' + esc(src.slice(b, to)) + (to < src.length ? ' …' : '');
+  }
+  function dateLine(m) { var d = fmtDate(str(m.date)); return d.g ? d.g : 'بدون تاريخ'; }
+
+  /* ---------- search ---------- */
+  function wireSearch() {
+    var inp = document.getElementById('hq'), hits = document.getElementById('hits'), listEl = document.getElementById('list');
+    var t = null;
+    inp.addEventListener('input', function () {
+      clearTimeout(t);
+      t = setTimeout(function () {
+        var q = norm(inp.value.trim());
+        if (q.length < 2) { hits.hidden = true; listEl.hidden = false; return; }
+        hits.hidden = false; listEl.hidden = true;
+        if (!all) hits.innerHTML = '<p class="empty">جاري البحث</p>';
+        loadAll().then(function (rows) {
+          if (view !== 'home' || norm(inp.value.trim()) !== q) return;
+          var out = [];
+          rows.forEach(function (m) {
+            var head = '<span class="h-sheikh">' + esc(m.sheikh || 'بدون اسم') + '</span><span class="h-date">' + esc(dateLine(m)) + '</span>';
+            [['topic', 'الموضوع'], ['general', 'الفوائد'], ['books', 'الكتب'], ['opening', 'التحضير']].forEach(function (f) {
+              var sn = snippet(str(m[f[0]]), q);
+              if (sn) out.push('<a class="hit" href="#s-' + esc(m.id) + '"><span class="h-head">' + head + '<span class="chip">' + f[1] + '</span></span><span class="h-snip">' + sn + '</span></a>');
+            });
+            (m.questions || []).forEach(function (qq) {
+              var sn = snippet(str(qq.text), q), where = 'السؤال';
+              if (!sn) { sn = snippet(str(qq.answer), q); where = 'الجواب'; }
+              if (sn) out.push('<a class="hit" href="#s-' + esc(m.id) + '~' + esc(qq.id) + '"><span class="h-head">' + head + '<span class="chip">' + where + '</span></span>' +
+                (where === 'الجواب' ? '<span class="h-q">' + esc(qq.text) + '</span>' : '') + '<span class="h-snip">' + sn + '</span></a>');
+            });
+          });
+          hits.innerHTML = out.length ? '<p class="hint">' + (out.length === 1 ? 'نتيجة وحدة' : ar(out.length) + ' نتيجة') + '</p>' + out.slice(0, 80).join('')
+            : '<p class="empty">ما لقيت شيء بهالكلمة في جلساتك.</p>';
+        }, function (e) { hits.innerHTML = '<p class="empty">' + esc(e.message) + '</p>'; });
+      }, 220);
+    });
+  }
+  function jumpTo(qid) {
+    if (!cur || !cur.els[qid]) return;
+    var el = cur.els[qid];
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+    setTimeout(function () { el.classList.remove('flash'); }, 2000);
+  }
+
+  /* ---------- sheikhs ---------- */
+  function sheikhKey(name) {
+    return norm(String(name || '').replace(/^\s*(فضيلة\s+)?(الشيخ|الدكتور|أ\.\s*د\.|د\.)\s*/, '')).replace(/\s+/g, ' ').trim() || 'بدون اسم';
+  }
+  function groupSheikhs(rows) {
+    var g = {};
+    rows.forEach(function (m) {
+      var k = sheikhKey(m.sheikh);
+      (g[k] = g[k] || { key: k, name: m.sheikh || 'بدون اسم', items: [] }).items.push(m);
+    });
+    return Object.keys(g).map(function (k) {
+      var x = g[k];
+      x.items.sort(function (a, b) { return str(b.date) < str(a.date) ? -1 : str(b.date) > str(a.date) ? 1 : (b.createdAt || 0) - (a.createdAt || 0); });
+      return x;
+    }).sort(function (a, b) { return b.items.length - a.items.length || (a.name < b.name ? -1 : 1); });
+  }
+  function openSheikhs() {
+    leaveSession(); view = 'sheikhs'; document.title = 'المشايخ · مجالس المشايخ';
+    app.innerHTML = pageTop('sheikhs', 'المشايخ', 'كل شيخ جلست معه، وتحت كل واحد مجالسك معه وتوجيهاته.') +
+      '<main class="home-main wrap"><div class="list" id="shList"><p class="empty">جاري التحميل</p></div></main>';
+    loadAll(true).then(function (rows) {
+      if (view !== 'sheikhs') return;
+      var gs = groupSheikhs(rows), el = document.getElementById('shList');
+      el.innerHTML = gs.length ? gs.map(function (x) {
+        var last = x.items[0];
+        return '<a class="s-card" href="#sh-' + encodeURIComponent(x.key) + '"><span class="s-name">' + esc(x.name) + '</span>' +
+          '<span class="s-stats">' + (x.items.length === 1 ? 'مجلس واحد' : x.items.length === 2 ? 'مجلسين' : ar(x.items.length) + ' مجالس') + '</span>' +
+          '<span class="s-date">آخر مجلس: ' + esc(dateLine(last)) + '</span></a>';
+      }).join('') : '<p class="empty">ما فيه جلسات بعد.</p>';
+    }, function (e) { var el = document.getElementById('shList'); if (el) el.innerHTML = '<p class="empty">' + esc(e.message) + '</p>'; });
+  }
+  function openSheikh(key) {
+    leaveSession(); view = 'sheikh';
+    app.innerHTML = pageTop('sheikhs', 'المشايخ', '') + '<main class="home-main wrap" id="shMain"><p class="empty">جاري التحميل</p></main>';
+    loadAll(true).then(function (rows) {
+      if (view !== 'sheikh') return;
+      var x = groupSheikhs(rows).filter(function (g) { return g.key === key; })[0];
+      var main = document.getElementById('shMain');
+      if (!x) { main.innerHTML = '<p class="empty">ما لقيت هذا الشيخ. <a href="#sheikhs">ارجع للمشايخ</a></p>'; return; }
+      document.title = x.name + ' · مجالس المشايخ';
+      var h = document.querySelector('.home-top h1'); if (h) h.textContent = x.name;
+      var html = '<a class="back" href="#sheikhs">‹ كل المشايخ</a><section class="sec"><h2>المجالس</h2><div class="list">' + x.items.map(function (m) {
+        var asked = (m.questions || []).filter(function (q) { return q.asked; }).length;
+        return '<a class="s-card" href="#s-' + esc(m.id) + '"><span class="s-topic">' + esc(m.topic || 'بدون موضوع') + '</span>' +
+          '<span class="s-date">' + esc(dateLine(m)) + '</span>' + ((m.questions || []).length ? '<span class="s-stats">' + ar(m.questions.length) + ' سؤال' + (asked ? ' · سألت ' + ar(asked) : '') + '</span>' : '') + '</a>';
+      }).join('') + '</div></section>';
+      var gen = x.items.filter(function (m) { return str(m.general).trim(); });
+      html += '<section class="sec"><h2>توجيهاته وفوائده</h2>' + (gen.length ? gen.map(function (m) {
+        return '<div class="sh-block"><a class="sh-from" href="#s-' + esc(m.id) + '">' + esc(dateLine(m)) + (m.topic ? ' · ' + esc(m.topic) : '') + '</a><div class="rich">' + md(m.general) + '</div></div>';
+      }).join('') : '<p class="empty">ما كتبت فوائد في مجالسه بعد.</p>') + '</section>';
+      var books = [];
+      x.items.forEach(function (m) { bookLines(m.books).forEach(function (b) { books.push({ t: b, m: m }); }); });
+      html += '<section class="sec"><h2>كتب وآثار ذكرها</h2>' + (books.length ? '<ul class="lib">' + books.map(function (b) {
+        return '<li><span>' + esc(b.t) + '</span><a class="sh-from" href="#s-' + esc(b.m.id) + '">' + esc(dateLine(b.m)) + '</a></li>';
+      }).join('') + '</ul>' : '<p class="empty">ما فيه كتب مسجّلة.</p>') + '</section>';
+      main.innerHTML = html;
+    }, function (e) { var el = document.getElementById('shMain'); if (el) el.innerHTML = '<p class="empty">' + esc(e.message) + '</p>'; });
+  }
+
+  /* ---------- library ---------- */
+  function bookLines(txt) {
+    return String(txt || '').split(/\r?\n/).map(function (l) { return l.replace(/^\s*([-•*]|[0-9٠-٩]+[.)])\s*/, '').trim(); }).filter(function (l) { return l.length > 1; });
+  }
+  function openLibrary() {
+    leaveSession(); view = 'library'; document.title = 'المكتبة · مجالس المشايخ';
+    app.innerHTML = pageTop('library', 'المكتبة', 'كل الكتب والآثار اللي ذكرها المشايخ في جلساتك.') +
+      '<main class="home-main wrap"><div class="search-row"><label class="lbl" for="lq">تصفية</label><input class="input" id="lq" type="search" autocomplete="off" placeholder="اسم كتاب أو شيخ"></div>' +
+      '<div id="libList"><p class="empty">جاري التحميل</p></div></main>';
+    loadAll(true).then(function (rows) {
+      if (view !== 'library') return;
+      var items = [];
+      rows.forEach(function (m) { bookLines(m.books).forEach(function (b) { items.push({ t: b, m: m }); }); });
+      function paint() {
+        var q = norm(document.getElementById('lq').value.trim());
+        var shown = items.filter(function (it) { return !q || norm(it.t + ' ' + it.m.sheikh).indexOf(q) !== -1; });
+        document.getElementById('libList').innerHTML = shown.length ? '<ul class="lib">' + shown.map(function (it) {
+          return '<li><span>' + esc(it.t) + '</span><a class="sh-from" href="#s-' + esc(it.m.id) + '">' + esc(it.m.sheikh || '') + ' · ' + esc(dateLine(it.m)) + '</a></li>';
+        }).join('') + '</ul>' : '<p class="empty">' + (items.length ? 'ما فيه نتيجة.' : 'ما فيه كتب مسجّلة بعد. اكتبها في «كتب وآثار ذكرها الشيخ» داخل كل جلسة.') + '</p>';
+      }
+      document.getElementById('lq').addEventListener('input', paint);
+      paint();
+    }, function (e) { var el = document.getElementById('libList'); if (el) el.innerHTML = '<p class="empty">' + esc(e.message) + '</p>'; });
+  }
+
+  /* ================= EXPORT: Word, print/PDF, backup ================= */
+  function curAsRecord() {
+    var by = sortedQs(), qs = [];
+    GROUPS.forEach(function (g) { by[g.key].forEach(function (id) { var q = cur.qs[id]; qs.push({ text: q.text, why: q.why, group: q.group, asked: q.asked, answer: q.answer }); }); });
+    var m = cur.meta || {};
+    return { sheikh: m.sheikh, topic: m.topic, date: m.date, place: m.place, books: m.books, general: m.general, questions: qs };
+  }
+  // ASCII file names: some browsers drop Arabic download names and the file loses its extension
+  function fileName(m) { return 'majlis' + (m.date ? '-' + m.date : '-' + new Date().toISOString().slice(0, 10)); }
+  function docTitle(m) { return 'مجلس ' + (m.sheikh || '') + (m.date ? ' ' + m.date : ''); }
+  function ansHtml(t) {
+    var lines = String(t || '').split(/\r?\n/), out = [], inList = false;
+    lines.forEach(function (l) {
+      var m = l.match(/^\s*[-•]\s+(.*)$/);
+      if (m) { if (!inList) { out.push('<ul>'); inList = true; } out.push('<li>' + esc(m[1]) + '</li>'); return; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      if (l.trim()) out.push('<p>' + esc(l) + '</p>');
+    });
+    if (inList) out.push('</ul>');
+    return out.join('');
+  }
+  function recordHtml(m) {
+    var d = fmtDate(str(m.date));
+    var h = '<h1>مجلس مع ' + esc(m.sheikh || 'الشيخ') + '</h1><p class="meta">' +
+      [m.topic ? 'الموضوع: ' + esc(m.topic) : '', d.g ? 'التاريخ: ' + esc(d.g) + (d.h ? ' (' + esc(d.h) + ')' : '') : '', m.place ? 'المكان: ' + esc(m.place) : ''].filter(Boolean).join(' · ') + '</p>';
+    var qs = (m.questions || []);
+    if (qs.length) {
+      h += '<h2>الأسئلة والأجوبة</h2>';
+      qs.forEach(function (q, i) {
+        h += '<div class="pq"><p class="qt">' + ar(i + 1) + '. ' + esc(q.text) + '</p>' + (str(q.answer).trim() ? '<div class="qa">' + ansHtml(q.answer) + '</div>' : '<p class="na">لم يُكتب جواب.</p>') + '</div>';
+      });
+    }
+    if (str(m.general).trim()) h += '<h2>فوائد وأفكار للتطبيق</h2>' + ansHtml(m.general);
+    if (str(m.books).trim()) h += '<h2>كتب وآثار ذكرها الشيخ</h2>' + ansHtml(m.books);
+    return h;
+  }
+  var DOC_CSS = 'body{direction:rtl;font-family:"Traditional Arabic","Amiri","Arial",sans-serif;font-size:15pt;line-height:1.7;color:#111}' +
+    'h1{font-size:24pt;margin:0 0 4pt}h2{font-size:17pt;color:#1D6A56;margin:18pt 0 6pt;border-bottom:1px solid #ccc}' +
+    '.meta{color:#555;font-size:12pt}.qt{font-weight:bold;margin:12pt 0 2pt}.qa p,.qa li{margin:2pt 0}.na{color:#888}ul{margin:0 18pt 0 0;padding:0}' +
+    '.brk{page-break-before:always}';
+  function docHtml(recs) {
+    return '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40" dir="rtl">' +
+      '<head><meta charset="utf-8"><title>' + esc(recs.length === 1 ? docTitle(recs[0]) : 'مجالس المشايخ') + '</title><style>' + DOC_CSS + '</style></head><body dir="rtl">' +
+      recs.map(function (m, i) { return (i ? '<div class="brk"></div>' : '') + recordHtml(m); }).join('') + '</body></html>';
+  }
+  function download(name, content, type) {
+    var blob = new Blob(['﻿', content], { type: type + ';charset=utf-8' });
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 4000);
+  }
+  function printRecords(recs) {
+    var old = document.getElementById('printArea'); if (old) old.remove();
+    var el = document.createElement('div'); el.id = 'printArea'; el.dir = 'rtl';
+    el.innerHTML = recs.map(function (m, i) { return (i ? '<div class="brk"></div>' : '') + recordHtml(m); }).join('');
+    document.body.appendChild(el);
+    document.documentElement.classList.add('printing');
+    setTimeout(function () {
+      window.print();
+      setTimeout(function () { document.documentElement.classList.remove('printing'); el.remove(); }, 500);
+    }, 50);
+  }
+  function exportAll(kind, btn) {
+    var label = btn.textContent; btn.disabled = true; btn.textContent = 'جاري التجهيز';
+    loadAll(true).then(function (rows) {
+      btn.disabled = false; btn.textContent = label;
+      var today = new Date().toISOString().slice(0, 10);
+      if (kind === 'json') download('majalis-backup-' + today + '.json', JSON.stringify({ app: 'majalis', exportedAt: new Date().toISOString(), majalis: rows }, null, 1), 'application/json');
+      else download('majalis-' + today + '.doc', docHtml(rows.slice().sort(function (a, b) { return str(a.date) < str(b.date) ? -1 : 1; })), 'application/msword');
+    }, function (e) { btn.disabled = false; btn.textContent = label; toast(e.message); });
+  }
+
   /* ================= ADMIN: users and AI approval ================= */
   function openAdmin() {
     leaveSession();
@@ -473,11 +727,11 @@
   /* ================= SESSION ================= */
   var META_FIELDS = ['sheikh', 'topic', 'date', 'place', 'opening', 'briefing', 'books', 'general'];
 
-  function openSession(sid) {
-    if (cur && cur.sid === sid) return;
+  function openSession(sid, jump) {
+    if (cur && cur.sid === sid) { if (jump) jumpTo(jump); return; }
     leaveSession();
     view = 'session';
-    cur = { sid: sid, meta: null, qs: {}, els: {}, editing: {}, richEdit: {}, creating: {}, deleting: {}, loaded: false };
+    cur = { sid: sid, meta: null, qs: {}, els: {}, editing: {}, richEdit: {}, creating: {}, deleting: {}, loaded: false, jump: jump || '' };
     app.innerHTML =
       '<header class="s-top wrap">' +
       '<a class="back" href="#">‹ كل الجلسات</a>' +
@@ -519,7 +773,9 @@
       '<section class="sec" id="sec-notes" aria-labelledby="h-notes"><h2 id="h-notes">ملاحظات عامة</h2><div class="notes-grid">' +
       '<div class="field"><label for="m-books">كتب وآثار ذكرها الشيخ</label><textarea class="note" id="m-books" data-f="books" placeholder="اكتب أسماء الكتب والآثار كما ذكرها"></textarea></div>' +
       '<div class="field"><label for="m-general">فوائد وأفكار للتطبيق</label><textarea class="note" id="m-general" data-f="general" placeholder="أي فائدة أو فكرة تبي تطبقها مع طلابك"></textarea></div>' +
-      '</div><div class="btns"><button class="btn primary" id="copyAll" type="button">نسخ الجلسة كاملة</button><button class="btn" id="copyQ" type="button">نسخ الأسئلة فقط</button></div>' +
+      '</div><div class="btns"><button class="btn primary" id="copyAll" type="button">نسخ الجلسة كاملة</button><button class="btn" id="copyQ" type="button">نسخ الأسئلة فقط</button>' +
+      '<button class="btn" id="dlDoc" type="button">تنزيل Word</button><button class="btn" id="printBtn" type="button">طباعة أو PDF</button></div>' +
+      '<span class="hint">ملف Word والطباعة فيها الأسئلة والأجوبة والفوائد والكتب، بدون التحضير وتحليل الشخصية.</span>' +
       '<textarea id="copyBox" readonly hidden aria-label="النص للنسخ"></textarea></section>' +
       richSection('sec-brief', 'عن الشيخ', 'briefing', 'اكتب هنا ما تعرفه عن الشيخ وأسلوبه.') +
       '<div class="danger-zone"><button class="btn ghost" id="delSession" type="button">حذف الجلسة</button></div>' +
@@ -580,6 +836,7 @@
     cur.loaded = true;
     paintMeta();
     renderQuestions();
+    if (first && cur.jump) { var jq = cur.jump; setTimeout(function () { jumpTo(jq); }, 60); }
     var l = document.getElementById('loading'), body = document.getElementById('sessionBody');
     if (l) l.hidden = true;
     if (body) body.hidden = false;
@@ -881,6 +1138,8 @@
     }
     wire(document.getElementById('copyAll'), true);
     wire(document.getElementById('copyQ'), false);
+    document.getElementById('dlDoc').addEventListener('click', function () { if (cur && cur.meta) download(fileName(curAsRecord()) + '.doc', docHtml([curAsRecord()]), 'application/msword'); });
+    document.getElementById('printBtn').addEventListener('click', function () { if (cur && cur.meta) printRecords([curAsRecord()]); });
 
     var del = document.getElementById('delSession');
     del.addEventListener('click', function () {

@@ -279,3 +279,50 @@ html.no-scroll, html.no-scroll body { overflow: hidden; }
 }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+/* Notebook tabs */
+.home-tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-top: 6px; }
+.home-tabs a { text-decoration: none; color: var(--muted); font-weight: 600; font-size: 15.5px; padding: 8px 14px; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.home-tabs a:hover { color: var(--accent); }
+.home-tabs a.on { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Search */
+.search-row { display: grid; gap: 4px; }
+.search-row .input { background: var(--surface); }
+.hit { display: grid; gap: 4px; text-decoration: none; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; }
+.hit:hover { border-color: var(--accent); }
+.h-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.h-sheikh { font-weight: 600; }
+.h-date { font-size: 13.5px; color: var(--muted); }
+.h-q { font-size: 14.5px; color: var(--muted); }
+.h-snip { line-height: 1.8; overflow-wrap: anywhere; }
+mark { background: var(--gold-soft); color: var(--fg); border-radius: 3px; padding: 0 2px; }
+.q.flash { box-shadow: 0 0 0 3px var(--gold); }
+
+/* Export row */
+.export-row { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 18px; }
+
+/* Sheikh page and library */
+.sh-block { display: grid; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+.sh-from { font-size: 13.5px; color: var(--muted); text-decoration: none; white-space: nowrap; }
+.sh-from:hover { color: var(--accent); }
+.lib { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lib li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+.lib li span { min-width: 0; overflow-wrap: anywhere; }
+
+/* Print / PDF */
+#printArea { display: none; }
+@media print {
+  html.printing body::before { display: none; }
+  html.printing body > *:not(#printArea) { display: none !important; }
+  html.printing #printArea { display: block; color: #000; background: #fff; font-family: "Amiri", "Traditional Arabic", serif; font-size: 13pt; line-height: 1.75; }
+  #printArea h1 { font-size: 22pt; margin: 0 0 4pt; }
+  #printArea h2 { font-size: 15pt; color: #1D6A56; border-bottom: 1px solid #bbb; margin: 16pt 0 6pt; }
+  #printArea .meta { color: #444; font-size: 11pt; }
+  #printArea .qt { font-weight: 700; margin: 10pt 0 2pt; }
+  #printArea .pq { break-inside: avoid; }
+  #printArea ul { margin: 0; padding: 0 18pt 0 0; }
+  #printArea p { margin: 2pt 0; }
+  #printArea .na { color: #777; }
+  #printArea .brk { break-before: page; }
+}
