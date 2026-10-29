@@ -182,7 +182,7 @@
     if (!me && view === 'share') { view = null; boot(); return; }
     route();
   });
-  function leaveSession() { closeFocus(true); if (!cur) return; flushAll(); cur = null; }
+  function leaveSession() { closeFocus(true); endSel(); if (!cur) return; flushAll(); cur = null; }
 
   /* ================= LOGIN / FIRST-RUN SETUP ================= */
   function showLogin() {
@@ -250,14 +250,14 @@
     document.title = 'مجالس المشايخ';
     app.innerHTML =
       '<header class="home-top wrap"><div class="home-head"><div class="eyebrow">دفترك مع أهل العلم</div>' +
-      '<div class="who"><span>' + esc(me && me.name) + '</span>' + (me && me.role === 'admin' ? '<a class="linkish" href="#admin">المستخدمون</a>' : '') + '<button class="linkish" id="logout" type="button">خروج</button></div></div>' +
+      '<div class="who"><span>' + esc(me && me.name) + '</span>' + (me && me.role === 'admin' ? '<a class="linkish" href="#admin">المستخدمون</a>' : '') + themeBtnHtml() + '<button class="linkish" id="logout" type="button">خروج</button></div></div>' +
       '<h1>دفتر مجالس المشايخ</h1>' +
       '<p class="lede">سجّل كل مجلس: التحضير، والأسئلة، وأجوبة الشيخ، والفوائد. وتقدر تضيف أسئلة وتعدّلها وأنت في الجلسة.</p>' +
       tabsHtml('home') + '</header>' +
       '<main class="home-main wrap">' +
       pendingHtml() +
       aiPanelHtml() +
-      '<div class="btns"><button class="btn" id="newBtn" type="button">جلسة يدوية</button></div>' +
+      '<div class="btns"><button class="btn" id="newBtn" type="button">جلسة يدوية</button><button class="btn ghost" id="selMaj" type="button">تحديد للحذف</button></div>' +
       '<form class="new-form" id="newForm" hidden autocomplete="off">' +
       '<div class="new-grid">' +
       '<div class="field"><label for="nf-sheikh">اسم الشيخ</label><input class="input" id="nf-sheikh" required placeholder="مثال: الشيخ عبدالله"></div>' +
@@ -274,6 +274,7 @@
       '<span class="hint">النسخة الاحتياطية ملف فيه كل شيء كتبته، احفظه عندك.</span></section></main>';
     var form = document.getElementById('newForm');
     wireSearch();
+    document.getElementById('selMaj').addEventListener('click', function () { startSel('majalis'); });
     document.getElementById('dlAllDoc').addEventListener('click', function (e) { exportAll('doc', e.target); });
     document.getElementById('dlAllJson').addEventListener('click', function (e) { exportAll('json', e.target); });
     document.getElementById('logout').addEventListener('click', function () {
@@ -318,7 +319,7 @@
     el.innerHTML = items.map(function (s) {
       var d = fmtDate(str(s.date));
       var stats = s.qCount ? (ar(s.qCount) + ' سؤال' + (s.askedCount ? ' · سألت ' + ar(s.askedCount) : '')) : '';
-      return '<a class="s-card" href="#s-' + esc(s.id) + '"><span class="s-name">' + esc(str(s.sheikh) || 'بدون اسم') + '</span>' +
+      return '<a class="s-card" href="#s-' + esc(s.id) + '" data-sel="' + esc(s.id) + '" data-sel-kind="majalis"' + (sel && sel.ids[s.id] ? ' class="s-card is-sel"' : '') + '><span class="s-name">' + esc(str(s.sheikh) || 'بدون اسم') + '</span>' +
         (str(s.topic) ? '<span class="s-topic">' + esc(s.topic) + '</span>' : '') +
         '<span class="s-date">' + (d.g ? esc(d.g) + (d.h ? ' · ' + esc(d.h) : '') : 'بدون تاريخ') + '</span>' +
         (stats ? '<span class="s-stats">' + stats + '</span>' : '') + '</a>';
@@ -439,7 +440,7 @@
   }
   function pageTop(on, title, lede) {
     return '<header class="home-top wrap"><div class="home-head"><div class="eyebrow">دفترك مع أهل العلم</div>' +
-      '<div class="who"><span>' + esc(me && me.name) + '</span></div></div>' +
+      '<div class="who"><span>' + esc(me && me.name) + '</span>' + themeBtnHtml() + '</div></div>' +
       '<h1>' + title + '</h1>' + (lede ? '<p class="lede">' + lede + '</p>' : '') + tabsHtml(on) + '</header>';
   }
 
@@ -675,12 +676,14 @@
     view = 'admin';
     document.title = 'المستخدمون · مجالس المشايخ';
     app.innerHTML =
-      '<header class="s-top wrap"><a class="back" href="#">‹ كل الجلسات</a><h1>المستخدمون</h1>' +
+      '<header class="s-top wrap"><div class="home-head"><a class="back" href="#">‹ كل الجلسات</a><div class="who">' + themeBtnHtml() + '</div></div><h1>المستخدمون</h1>' +
       '<p class="lede">أي حساب جديد ما يدخل الموقع إلا بعد ما تقبله. وبعد القبول يستخدم الدفتر يدويًا، وفعّل «الذكاء الاصطناعي» للي تبيهم يجهّزون جلسات من رصيدك. وكل مستخدم يشوف جلساته هو بس.</p></header>' +
       '<main class="home-main wrap">' +
       '<form class="limit-row" id="limitForm"><label for="lim">حد الجلسات بالذكاء الاصطناعي لكل مستخدم في اليوم</label>' +
       '<input class="input" id="lim" type="number" min="0" max="50" inputmode="numeric" style="max-width:110px"><button class="btn" type="submit">حفظ</button><span class="hint" id="limMsg"></span></form>' +
+      '<div class="btns"><button class="btn ghost" id="selUsers" type="button">تحديد عدة مستخدمين</button></div>' +
       '<div class="list" id="users"><p class="empty">جاري التحميل</p></div></main>';
+    document.getElementById('selUsers').addEventListener('click', function () { startSel('users'); });
     document.getElementById('limitForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var n = Number(document.getElementById('lim').value);
@@ -695,7 +698,7 @@
       var el = document.getElementById('users');
       el.innerHTML = j.users.map(function (u) {
         var isAdm = u.role === 'admin';
-        return '<div class="u-row" data-id="' + esc(u.id) + '"><div class="u-main"><div class="u-line"><b>' + esc(u.name) + '</b><span class="u-sub" dir="ltr">@' + esc(u.username) + '</span>' +
+        return '<div class="u-row" data-id="' + esc(u.id) + '"' + (isAdm ? '' : ' data-sel="' + esc(u.id) + '" data-sel-kind="users"') + '><div class="u-main"><div class="u-line"><b>' + esc(u.name) + '</b><span class="u-sub" dir="ltr">@' + esc(u.username) + '</span>' +
           (isAdm ? '<span class="chip">المدير</span>' : '') + (!isAdm && !u.approved ? '<span class="chip">بانتظار الموافقة</span>' : '') + '</div>' +
           '<span class="u-sub">' + ar(u.majalis) + ' جلسة · ' + ar(u.ai30) + ' بالذكاء الاصطناعي آخر ٣٠ يوم</span>' +
           (u.about ? '<span class="u-sub">' + esc(u.about) + '</span>' : '') + '</div>' +
@@ -707,6 +710,7 @@
               '<button class="icon-btn" type="button" data-suspend>إيقاف</button>' +
               '<button class="icon-btn" type="button" data-del data-label="حذف">حذف</button></div>') + '</div>';
       }).join('') || '<p class="empty">ما فيه مستخدمين</p>';
+      if (sel && sel.kind === 'users') el.querySelectorAll('[data-sel]').forEach(function (r) { r.classList.toggle('is-sel', !!sel.ids[r.dataset.sel]); });
     }, function (er) { var el = document.getElementById('users'); if (el) el.innerHTML = '<p class="empty">' + esc(er.message) + '</p>'; });
   }
   app.addEventListener('change', function (e) {
@@ -786,6 +790,7 @@
       '<div class="q-tools"><span class="progress" id="progress"></span><div class="btns">' +
       '<button class="btn primary" id="focusBtn" type="button">وضع المجلس</button>' +
       '<button class="btn" id="timerBtn" type="button" aria-expanded="false">المؤقت</button>' +
+      '<button class="btn ghost" id="selQs" type="button">تحديد للحذف</button>' +
       '<button class="btn" id="wakeBtn" type="button" aria-pressed="false" hidden>إبقاء الشاشة شغالة</button></div></div>' +
       '<form class="timer-panel" id="timerPanel" hidden autocomplete="off">' +
       '<label for="tm-min">مدة المجلس بالدقائق</label><input class="input" id="tm-min" type="number" min="5" max="300" step="5" inputmode="numeric" value="45">' +
@@ -935,7 +940,7 @@
 
   function buildQ(id) {
     var li = document.createElement('li');
-    li.className = 'q'; li.dataset.qid = id;
+    li.className = 'q'; li.dataset.qid = id; li.dataset.sel = id; li.dataset.selKind = 'qs';
     li.innerHTML =
       '<span class="q-num" aria-hidden="true"></span><div class="q-body">' +
       '<div class="q-view"><p class="q-text"></p><p class="q-why" hidden></p></div>' +
@@ -1189,6 +1194,7 @@
     });
 
     document.getElementById('focusBtn').addEventListener('click', openFocus);
+    document.getElementById('selQs').addEventListener('click', function () { startSel('qs'); });
     document.getElementById('icsBtn').addEventListener('click', function (e) {
       e.preventDefault();
       if (!cur || !cur.meta) return;
@@ -1236,6 +1242,101 @@
       });
     }
   }
+
+  /* ================= THEME: system / dark / light ================= */
+  var THKEY = 'majalis-theme';
+  function getTheme() { try { var t = localStorage.getItem(THKEY); return t === 'light' || t === 'dark' ? t : ''; } catch (e) { return ''; } }
+  function applyTheme(t) { if (t) document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme'); }
+  function themeLabel() { var t = getTheme(); return t === 'dark' ? 'المظهر: داكن' : t === 'light' ? 'المظهر: فاتح' : 'المظهر: تلقائي'; }
+  function themeBtnHtml() { return '<button class="linkish" type="button" data-theme-btn>' + themeLabel() + '</button>'; }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-theme-btn]'); if (!b) return;
+    var t = getTheme(), nt = t === '' ? 'dark' : t === 'dark' ? 'light' : '';
+    try { if (nt) localStorage.setItem(THKEY, nt); else localStorage.removeItem(THKEY); } catch (er) {}
+    applyTheme(nt);
+    document.querySelectorAll('[data-theme-btn]').forEach(function (x) { x.textContent = themeLabel(); });
+    toast(nt === 'dark' ? 'صار المظهر داكن' : nt === 'light' ? 'صار المظهر فاتح' : 'المظهر يتبع جهازك');
+  });
+  applyTheme(getTheme());
+
+  /* ================= MULTI-SELECT: delete (and approve) many at once ================= */
+  var sel = null; // { kind: 'majalis' | 'qs' | 'users', ids: {} }
+  function startSel(kind) {
+    sel = { kind: kind, ids: {}, armed: false };
+    document.documentElement.classList.add('selecting');
+    paintSel();
+  }
+  function endSel() {
+    if (!sel) return;
+    sel = null;
+    document.documentElement.classList.remove('selecting');
+    var bar = document.getElementById('selBar'); if (bar) bar.remove();
+    document.querySelectorAll('.is-sel').forEach(function (e) { e.classList.remove('is-sel'); });
+  }
+  function selItems() { return Array.prototype.filter.call(document.querySelectorAll('[data-sel]'), function (e) { return e.dataset.selKind === sel.kind && e.offsetParent !== null; }); }
+  function paintSel() {
+    if (!sel) return;
+    var n = Object.keys(sel.ids).length;
+    var bar = document.getElementById('selBar');
+    if (!bar) { bar = document.createElement('div'); bar.id = 'selBar'; bar.className = 'sel-bar'; document.body.appendChild(bar); }
+    var what = sel.kind === 'majalis' ? 'جلسة' : sel.kind === 'qs' ? 'سؤال' : 'مستخدم';
+    bar.innerHTML = '<div class="sel-in"><span class="sel-n">' + (n ? 'محدد: ' + ar(n) + ' ' + what : 'اضغط على اللي تبي تحدده') + '</span>' +
+      '<button class="btn" type="button" id="selAll">' + (n && n === selItems().length ? 'إلغاء تحديد الكل' : 'تحديد الكل') + '</button>' +
+      (sel.kind === 'users' ? '<button class="btn" type="button" id="selApprove"' + (n ? '' : ' disabled') + '>قبول</button>' : '') +
+      '<button class="btn danger" type="button" id="selDel"' + (n ? '' : ' disabled') + '>' + (sel.armed ? 'تأكيد حذف ' + ar(n) : 'حذف') + '</button>' +
+      '<button class="btn ghost" type="button" id="selCancel">إلغاء</button></div>';
+    document.getElementById('selCancel').addEventListener('click', endSel);
+    document.getElementById('selAll').addEventListener('click', function () {
+      var items = selItems(), allOn = n && n === items.length;
+      sel.ids = {}; sel.armed = false;
+      items.forEach(function (e) { if (!allOn) sel.ids[e.dataset.sel] = true; e.classList.toggle('is-sel', !allOn); });
+      paintSel();
+    });
+    var ap = document.getElementById('selApprove');
+    if (ap) ap.addEventListener('click', function () {
+      ap.disabled = true;
+      api('/api/admin', { op: 'approveMany', ids: Object.keys(sel.ids) }).then(function (j) { toast('انقبل ' + ar(j.n || 0)); endSel(); loadUsers(); }, function (e) { ap.disabled = false; toast(e.message); });
+    });
+    document.getElementById('selDel').addEventListener('click', function () {
+      if (!sel.armed) { sel.armed = true; paintSel(); setTimeout(function () { if (sel && sel.armed) { sel.armed = false; paintSel(); } }, 4000); return; }
+      doSelDelete();
+    });
+  }
+  function doSelDelete() {
+    var ids = Object.keys(sel.ids), kind = sel.kind;
+    var btn = document.getElementById('selDel'); if (btn) { btn.disabled = true; btn.textContent = 'جاري الحذف'; }
+    if (kind === 'majalis') {
+      act('deleteMajlisMany', { ids: ids }).then(function (j) {
+        Object.keys(drafts).forEach(function (k) { if (drafts[k] && ids.indexOf(drafts[k].sid) !== -1) delete drafts[k]; }); saveDrafts();
+        list = list.filter(function (x) { return ids.indexOf(x.id) === -1; }); all = null;
+        endSel(); renderList(); toast('انحذف ' + ar(j.n || 0) + ' جلسة');
+      }, function (e) { toast(e.message); paintSel(); });
+    } else if (kind === 'qs') {
+      if (!cur) return;
+      var sid = cur.sid;
+      act('deleteQMany', { ids: ids }).then(function (j) {
+        if (!cur || cur.sid !== sid) return;
+        ids.forEach(function (qid) {
+          var ak = 'a/' + sid + '/' + qid;
+          if (WQ[ak]) { clearTimeout(WQ[ak].timer); WQ[ak].timer = null; WQ[ak].fn = null; WQ[ak].failed = false; }
+          clearDraft(ak); delete cur.qs[qid]; cur.deleting[qid] = true;
+        });
+        endSel(); renderQuestions(); toast('انحذف ' + ar(j.n || 0) + ' سؤال');
+      }, function (e) { toast(e.message); paintSel(); });
+    } else {
+      api('/api/admin', { op: 'deleteUsers', ids: ids }).then(function (j) { endSel(); loadUsers(); toast('انحذف ' + ar(j.n || 0) + ' مستخدم'); }, function (e) { toast(e.message); paintSel(); });
+    }
+  }
+  document.addEventListener('click', function (e) {
+    if (!sel) return;
+    var it = e.target.closest && e.target.closest('[data-sel]');
+    if (!it || it.dataset.selKind !== sel.kind) return;
+    e.preventDefault(); e.stopPropagation();
+    var id = it.dataset.sel;
+    if (sel.ids[id]) delete sel.ids[id]; else sel.ids[id] = true;
+    it.classList.toggle('is-sel', !!sel.ids[id]);
+    sel.armed = false; paintSel();
+  }, true);
 
   /* ================= SHARE (read-only link) ================= */
   function shareTokenFromHash() { var m = (location.hash || '').match(/^#share-([A-Za-z0-9_-]{16,64})$/); return m ? m[1] : ''; }

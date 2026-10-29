@@ -71,6 +71,16 @@ export async function POST(req: Request) {
         await prisma.majlis.delete({ where: { id: b.id } });
         return { ok: true };
       }
+      case "deleteMajlisMany": {
+        const ids = Array.isArray(b.ids) ? b.ids.map(String).slice(0, 500) : [];
+        const r = await prisma.majlis.deleteMany({ where: { id: { in: ids }, userId: me.id } });
+        return { n: r.count };
+      }
+      case "deleteQMany": {
+        const ids = Array.isArray(b.ids) ? b.ids.map(String).slice(0, 500) : [];
+        const r = await prisma.question.deleteMany({ where: { id: { in: ids }, majlis: { userId: me.id } } });
+        return { n: r.count };
+      }
       case "addQ": {
         await ownMajlis(me.id, b.majlisId);
         const d = qFields(b.fields);

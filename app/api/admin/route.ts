@@ -62,6 +62,12 @@ export async function POST(req: Request) {
       await prisma.setting.upsert({ where: { key: "ai_daily_limit" }, create: { key: "ai_daily_limit", value: String(n) }, update: { value: String(n) } });
       return { ok: true, limit: n };
     }
+    if (b.op === "deleteUsers" || b.op === "approveMany") {
+      const ids = Array.isArray(b.ids) ? b.ids.map(String).slice(0, 500) : [];
+      const where = { id: { in: ids }, role: { not: "admin" } };
+      const r = b.op === "deleteUsers" ? await prisma.user.deleteMany({ where }) : await prisma.user.updateMany({ where, data: { approved: true } });
+      return { n: r.count };
+    }
     if (b.op === "deleteUser") {
       const u = await prisma.user.findUnique({ where: { id: String(b.id || "") } });
       if (!u) fail("ما لقيت المستخدم", 404);

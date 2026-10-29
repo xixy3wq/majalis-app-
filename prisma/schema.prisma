@@ -47,12 +47,13 @@ model Majlis {
   books     String     @default("")
   general   String     @default("")
   /// رابط مشاركة للقراءة فقط (null = غير مشارك)
-  shareToken String?   @unique
+  shareToken String?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   questions Question[]
 
   @@index([userId])
+  @@index([shareToken])
 }
 
 /// grp: core | ask | spare
