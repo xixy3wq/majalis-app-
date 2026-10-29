@@ -5,7 +5,16 @@ import { del, issueSignedToken, presignUrl, put } from "@vercel/blob";
 import { prisma } from "./db";
 
 export type Access = "private" | "public";
+// إذا انربط المخزن ببادئة مختلفة (مثل MAJALIS_FILES_READ_WRITE_TOKEN) نلقى المفتاح من شكل قيمته
+(function adoptToken() {
+  if (process.env.BLOB_READ_WRITE_TOKEN) return;
+  for (const v of Object.values(process.env)) {
+    if (typeof v === "string" && v.startsWith("vercel_blob_rw_")) { process.env.BLOB_READ_WRITE_TOKEN = v; return; }
+  }
+})();
 export const blobReady = () => !!process.env.BLOB_READ_WRITE_TOKEN;
+/** أسماء متغيرات المخزن الموجودة (الأسماء فقط بدون القيم) للمساعدة في معرفة سبب عدم التفعيل */
+export const blobEnvNames = () => Object.keys(process.env).filter((k) => /BLOB|STORE_ID/i.test(k)).sort();
 /** سعة الخطة المجانية في Vercel (Hobby): ١ جيجا. إذا تعداها يقفل المخزن ٣٠ يوم، فنوقف قبلها. */
 export const QUOTA = 1024 * 1024 * 1024;
 export const SAFE_LIMIT = Math.floor(QUOTA * 0.85);

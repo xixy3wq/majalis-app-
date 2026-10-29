@@ -2296,7 +2296,7 @@
   function paintRecPanel(sid) {
     var el = document.getElementById('recPanel'); if (!el) return;
     if (ai && !ai.store) {
-      el.innerHTML = '<p class="rich-empty">' + (ai.admin ? 'التسجيل يحتاج مخزن الملفات: من Vercel افتح Storage ← Create ← Blob (خلّه Private) واربطه بالمشروع.' : 'التسجيل غير مفعّل في الموقع بعد.') + '</p>';
+      el.innerHTML = '<p class="rich-empty">' + (ai.admin ? 'الموقع ما لقى مخزن الملفات. التفاصيل في صفحة <a href="#admin">المستخدمون</a> ← النسخ الاحتياطي.' : 'التسجيل غير مفعّل في الموقع بعد.') + '</p>';
       return;
     }
     if (UP[sid]) {
@@ -2577,7 +2577,8 @@
       var st = document.getElementById('bkState');
       if (!j.ready) {
         st.textContent = 'غير مفعّل'; st.classList.add('off');
-        body.innerHTML = '<p class="rich-empty">يحتاج مخزن الملفات: من Vercel افتح مشروعك ← Storage ← Create ← Blob ← خلّه Private ← Create ← Connect. بعدها يبدأ النسخ التلقائي كل ليلة.</p>';
+        body.innerHTML = '<p class="rich-empty">الموقع ما لقى مفتاح مخزن الملفات (BLOB_READ_WRITE_TOKEN). من Vercel: Storage ← تأكد إن مخزن Blob مربوط بمشروع majalis-app، وبعدها Deployments ← آخر نشر ← Redeploy.' +
+          ((j.env || []).length ? '<br>المتغيرات الموجودة الحين: <span dir="ltr">' + j.env.map(esc).join('، ') + '</span>' : '<br>ما فيه أي متغير للمخزن في المشروع الحين.') + '</p>';
         return;
       }
       st.classList.remove('off');

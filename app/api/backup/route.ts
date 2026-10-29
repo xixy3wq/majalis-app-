@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { fail, handle, requireUser, text } from "@/lib/auth";
-import { blobReady, readUrl, storageUsed } from "@/lib/blob";
+import { blobEnvNames, blobReady, readUrl, storageUsed } from "@/lib/blob";
 import { addToLog, loadBackup, makeBackup, readLog, restore } from "@/lib/backup";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     if (b.op === "status") {
       const log = blobReady() ? await readLog() : [];
       const users = await prisma.user.findMany({ select: { id: true, name: true, username: true }, orderBy: { createdAt: "asc" } });
-      return { ready: blobReady(), log, storage: blobReady() ? await storageUsed() : null, users };
+      return { ready: blobReady(), env: blobReady() ? [] : blobEnvNames(), log, storage: blobReady() ? await storageUsed() : null, users };
     }
     if (!blobReady()) fail("فعّل مخزن الملفات أول: Vercel ← Storage ← Blob", 503);
     if (b.op === "now") return { entry: await makeBackup("manual") };
