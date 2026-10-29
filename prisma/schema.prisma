@@ -18,6 +18,9 @@ model User {
   passwordHash String
   role         String   @default("user")
   aiAllowed    Boolean  @default(false)
+  /// approved: الحساب يدخل الموقع. التسجيل من صفحة «سجّل الحين» ينشئه false لين يوافق المدير.
+  /// الافتراضي true عشان الحسابات الموجودة (والمدير) ما تنقفل مع التحديث.
+  approved     Boolean  @default(true)
   /// تعريف المستخدم بنفسه وطلابه، يساعد الذكاء الاصطناعي يفصّل الأسئلة عليه
   about        String   @default("")
   createdAt    DateTime @default(now())

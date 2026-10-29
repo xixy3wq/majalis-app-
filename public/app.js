@@ -137,9 +137,15 @@
   var view = null; // 'login' | 'home' | 'session'
   var cur = null;
 
+  var pendingN = 0;
+  function pendingHtml() {
+    return me && me.role === 'admin' && pendingN > 0
+      ? '<p class="banner" id="pendBanner"><a href="#admin">' + (pendingN === 1 ? 'فيه طلب تسجيل واحد ينتظر موافقتك' : 'فيه ' + ar(pendingN) + ' طلبات تسجيل تنتظر موافقتك') + '</a></p>'
+      : '';
+  }
   function boot() {
     api('/api/data').then(function (j) {
-      me = j.me; ai = j.ai || null; list = j.majalis || []; listLoaded = true; netState = 'live';
+      me = j.me; ai = j.ai || null; list = j.majalis || []; listLoaded = true; netState = 'live'; pendingN = j.pending || 0;
       route();
     }, function (e) {
       if (e.status === 401) return; // showLogin already rendered
@@ -176,7 +182,7 @@
       '<div class="login wrap"><form class="login-card" id="loginForm" autocomplete="on">' +
       '<div class="eyebrow">دفترك مع أهل العلم</div><h1>مجالس المشايخ</h1>' +
       (setup ? '<p class="lede">أول مرة تفتح الموقع. سوّ حسابك وبيكون حساب المدير، وتلقى فيه مجالس الشيوخ الجاهزة.</p>' : '') +
-      (reg ? '<p class="lede">سوّ حسابك وابدأ تسجّل مجالسك. واستخدام الذكاء الاصطناعي يتفعّل بعد موافقة المدير.</p>' : '') +
+      (reg ? '<p class="lede">سوّ حسابك، ويتفعّل دخولك بعد موافقة المدير. وحسابك خاص فيك: جلساتك وبحثك ما يشوفها أحد غيرك.</p>' : '') +
       (newAcc ? '<div class="field"><label for="lg-n">اسمك</label><input class="input" id="lg-n" autocomplete="name" required></div>' : '') +
       '<div class="field"><label for="lg-u">اسم المستخدم</label><input class="input" id="lg-u" name="username" autocomplete="username" autocapitalize="none" dir="ltr" required' + (newAcc ? ' placeholder="حروف إنجليزية صغيرة"' : '') + '></div>' +
       '<div class="field"><label for="lg-p">كلمة المرور</label><input class="input" id="lg-p" name="password" type="password" autocomplete="' + (newAcc ? 'new-password' : 'current-password') + '" dir="ltr" required' + (newAcc ? ' placeholder="٨ أحرف أو أكثر"' : '') + '></div>' +
@@ -201,9 +207,20 @@
             if (setup && x.status === 409) { renderAuth('login'); return; }
             err.textContent = x.j.error || 'تعذّر الدخول'; return;
           }
+          if (reg && x.j.pending) { renderPending(); return; }
           view = null; boot();
         }, function () { btn.disabled = false; err.textContent = 'ما فيه اتصال، جرّب مرة ثانية.'; });
     });
+  }
+
+  function renderPending() {
+    app.innerHTML =
+      '<div class="login wrap"><div class="login-card">' +
+      '<div class="eyebrow">دفترك مع أهل العلم</div><h1>انرسل طلبك</h1>' +
+      '<p class="lede">حسابك انحفظ وينتظر موافقة المدير. بعد ما يوافق عليه تقدر تدخل باسم المستخدم وكلمة المرور اللي سويتها.</p>' +
+      '<button class="btn primary" type="button" id="pendBack">رجوع لتسجيل الدخول</button>' +
+      '</div></div>';
+    document.getElementById('pendBack').addEventListener('click', function () { renderAuth('login'); });
   }
 
   /* ================= HOME ================= */
@@ -217,6 +234,7 @@
       '<h1>دفتر مجالس المشايخ</h1>' +
       '<p class="lede">سجّل كل مجلس: التحضير، والأسئلة، وأجوبة الشيخ، والفوائد. وتقدر تضيف أسئلة وتعدّلها وأنت في الجلسة.</p></header>' +
       '<main class="home-main wrap">' +
+      pendingHtml() +
       aiPanelHtml() +
       '<div class="btns"><button class="btn" id="newBtn" type="button">جلسة يدوية</button></div>' +
       '<form class="new-form" id="newForm" hidden autocomplete="off">' +
@@ -246,7 +264,14 @@
     });
     renderList();
     wireAi();
-    api('/api/data').then(function (j) { list = j.majalis || []; if (view === 'home') renderList(); }, function () {});
+    api('/api/data').then(function (j) {
+      list = j.majalis || []; pendingN = j.pending || 0;
+      if (view !== 'home') return;
+      renderList();
+      var pb = document.getElementById('pendBanner'), html = pendingHtml();
+      if (pb && !html) pb.remove();
+      else if (!pb && html) { var mm = document.querySelector('.home-main'); if (mm) mm.insertAdjacentHTML('afterbegin', html); }
+    }, function () {});
   }
 
   function renderList() {
@@ -381,7 +406,7 @@
     document.title = 'المستخدمون · مجالس المشايخ';
     app.innerHTML =
       '<header class="s-top wrap"><a class="back" href="#">‹ كل الجلسات</a><h1>المستخدمون</h1>' +
-      '<p class="lede">الحسابات الجديدة تستخدم الدفتر يدويًا على طول. فعّل «الذكاء الاصطناعي» للي تبيهم يجهّزون جلسات من رصيدك.</p></header>' +
+      '<p class="lede">أي حساب جديد ما يدخل الموقع إلا بعد ما تقبله. وبعد القبول يستخدم الدفتر يدويًا، وفعّل «الذكاء الاصطناعي» للي تبيهم يجهّزون جلسات من رصيدك. وكل مستخدم يشوف جلساته هو بس.</p></header>' +
       '<main class="home-main wrap">' +
       '<form class="limit-row" id="limitForm"><label for="lim">حد الجلسات بالذكاء الاصطناعي لكل مستخدم في اليوم</label>' +
       '<input class="input" id="lim" type="number" min="0" max="50" inputmode="numeric" style="max-width:110px"><button class="btn" type="submit">حفظ</button><span class="hint" id="limMsg"></span></form>' +
@@ -401,11 +426,15 @@
       el.innerHTML = j.users.map(function (u) {
         var isAdm = u.role === 'admin';
         return '<div class="u-row" data-id="' + esc(u.id) + '"><div class="u-main"><div class="u-line"><b>' + esc(u.name) + '</b><span class="u-sub" dir="ltr">@' + esc(u.username) + '</span>' +
-          (isAdm ? '<span class="chip">المدير</span>' : '') + '</div>' +
+          (isAdm ? '<span class="chip">المدير</span>' : '') + (!isAdm && !u.approved ? '<span class="chip">بانتظار الموافقة</span>' : '') + '</div>' +
           '<span class="u-sub">' + ar(u.majalis) + ' جلسة · ' + ar(u.ai30) + ' بالذكاء الاصطناعي آخر ٣٠ يوم</span>' +
           (u.about ? '<span class="u-sub">' + esc(u.about) + '</span>' : '') + '</div>' +
-          (isAdm ? '' : '<div class="u-act"><label class="asked"><input type="checkbox" data-ai ' + (u.aiAllowed ? 'checked' : '') + '><span>الذكاء الاصطناعي</span></label>' +
-            '<button class="icon-btn" type="button" data-del>حذف</button></div>') + '</div>';
+          (isAdm ? '' : !u.approved
+            ? '<div class="u-act"><button class="btn primary" type="button" data-approve>قبول</button>' +
+              '<button class="icon-btn" type="button" data-del data-label="رفض">رفض</button></div>'
+            : '<div class="u-act"><label class="asked"><input type="checkbox" data-ai ' + (u.aiAllowed ? 'checked' : '') + '><span>الذكاء الاصطناعي</span></label>' +
+              '<button class="icon-btn" type="button" data-suspend>إيقاف</button>' +
+              '<button class="icon-btn" type="button" data-del data-label="حذف">حذف</button></div>') + '</div>';
       }).join('') || '<p class="empty">ما فيه مستخدمين</p>';
     }, function (er) { var el = document.getElementById('users'); if (el) el.innerHTML = '<p class="empty">' + esc(er.message) + '</p>'; });
   }
@@ -418,8 +447,16 @@
   });
   app.addEventListener('click', function (e) {
     if (view !== 'admin') return;
+    var ap = e.target.closest('button[data-approve], button[data-suspend]');
+    if (ap) {
+      ap.disabled = true;
+      api('/api/admin', { op: 'setApproved', id: ap.closest('.u-row').dataset.id, approved: ap.hasAttribute('data-approve') })
+        .then(loadUsers, function (er) { ap.disabled = false; alertLine(er.message); });
+      return;
+    }
     var b = e.target.closest('button[data-del]'); if (!b) return;
-    if (!b.classList.contains('arm')) { b.classList.add('arm'); b.textContent = 'تأكيد'; setTimeout(function () { b.classList.remove('arm'); b.textContent = 'حذف'; }, 3000); return; }
+    var lbl = b.getAttribute('data-label') || 'حذف';
+    if (!b.classList.contains('arm')) { b.classList.add('arm'); b.textContent = 'تأكيد'; setTimeout(function () { b.classList.remove('arm'); b.textContent = lbl; }, 3000); return; }
     api('/api/admin', { op: 'deleteUser', id: b.closest('.u-row').dataset.id }).then(loadUsers, function (er) { alertLine(er.message); });
   });
   function alertLine(msg) { var m = document.getElementById('limMsg'); if (m) m.textContent = msg; }

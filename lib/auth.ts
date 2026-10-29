@@ -14,6 +14,8 @@ export const fail = (msg: string, status = 400): never => { throw new ApiError(m
 export async function requireUser() {
   const u = await currentUser();
   if (!u) fail("سجّل دخولك", 401);
+  // الحساب اللي ما وافق عليه المدير ما يدخل أي صفحة
+  if (u!.role !== "admin" && !u!.approved) fail("حسابك بانتظار موافقة المدير", 401);
   return u!;
 }
 export function handle(fn: () => Promise<unknown>) {
