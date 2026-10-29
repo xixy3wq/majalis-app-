@@ -268,6 +268,8 @@
       tabsHtml('home') + '</header>' +
       '<main class="home-main wrap">' +
       pendingHtml() +
+      (recAllowed() ? '<form class="quick-lesson" id="qlForm" autocomplete="off"><div><b>🎙️ سجّل درس الحين</b><span>ملقي بيبدأ؟ اكتب اسمه (اختياري) واضغط، ويبدأ التسجيل على طول. وبعد ما تنهي يجيك ملخص الدرس كامل.</span></div>' +
+        '<div class="ql-row"><input class="input" id="ql-name" placeholder="اسم الملقي (اختياري)"><button class="btn primary" type="submit"><span class="rec-dot" aria-hidden="true"></span> ابدأ</button></div></form>' : '') +
       aiPanelHtml() +
       askHtml() +
       '<div class="btns"><button class="btn" id="newBtn" type="button">جلسة يدوية</button><button class="btn ghost" id="selMaj" type="button">تحديد للحذف</button></div>' +
@@ -293,6 +295,19 @@
     document.getElementById('dlAllJson').addEventListener('click', function (e) { exportAll('json', e.target); });
     document.getElementById('logout').addEventListener('click', function () {
       fetch('/api/logout', { method: 'POST' }).then(function () { location.hash = ''; showLogin(); });
+    });
+    var ql = document.getElementById('qlForm');
+    // تسجيل درس سريع: جلسة جديدة بنوع «درس كامل» ويبدأ التسجيل مباشرة
+    if (ql) ql.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var b = ql.querySelector('button'); b.disabled = true;
+      var name = document.getElementById('ql-name').value.trim(), id = newId(), d = new Date();
+      var day = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      act('createMajlis', { id: id, fields: { sheikh: name || 'درس', topic: 'درس', date: day } }).then(function (j) {
+        setRecMode(j.id, 'lesson');
+        try { sessionStorage.setItem('autoRec', j.id); } catch (er) {}
+        location.hash = 's-' + j.id;
+      }, function (er) { b.disabled = false; toast(er.message); });
     });
     document.getElementById('newBtn').addEventListener('click', function () { form.hidden = false; document.getElementById('nf-sheikh').focus(); });
     document.getElementById('nfCancel').addEventListener('click', function () { form.hidden = true; });
@@ -946,6 +961,11 @@
     wireSession();
     wireRec(sid);
     paintRecPanel(sid);
+    var auto = null; try { auto = sessionStorage.getItem('autoRec'); } catch (er) {}
+    if (auto === sid) {
+      try { sessionStorage.removeItem('autoRec'); } catch (er) {}
+      setTimeout(function () { if (!REC && ai && ai.store) recStart(sid); var sc = document.getElementById('sec-rec'); if (sc) sc.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 400);
+    }
     var rq = document.getElementById('recQuick');
     if (rq) rq.addEventListener('click', function () {
       var sec = document.getElementById('sec-rec');

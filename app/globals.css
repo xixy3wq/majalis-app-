@@ -492,3 +492,10 @@ ul.plain { margin-block: 0; padding-inline-start: 50px; display: grid; gap: 4px;
 .lesson-story { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .lesson-story p { margin: 6px 0 0; line-height: 1.9; }
 .lesson-story .moral { color: var(--accent); font-weight: 700; }
+/* تسجيل درس سريع من الصفحة الرئيسية */
+.quick-lesson { display: grid; gap: 10px; padding: 16px; border: 1.5px solid var(--accent); border-radius: 14px; background: var(--accent-soft); margin-bottom: 16px; }
+.quick-lesson b { display: block; font-size: 17px; }
+.quick-lesson span { display: block; font-size: 13px; color: var(--muted); line-height: 1.7; }
+.ql-row { display: flex; gap: 8px; }
+.ql-row .input { flex: 1; min-width: 0; }
+.ql-row .btn { min-height: 44px; white-space: nowrap; }
