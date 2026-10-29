@@ -1,8 +1,9 @@
+import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { fail, handle, ID_RE, requireUser, text } from "@/lib/auth";
 export const dynamic = "force-dynamic";
 
-const META = ["sheikh", "topic", "date", "place", "opening", "briefing", "books", "general"] as const;
+const META = ["sheikh", "topic", "date", "time", "place", "opening", "briefing", "books", "general"] as const;
 const GROUPS = ["core", "ask", "spare"];
 
 async function ownMajlis(userId: string, id: string) {
@@ -17,8 +18,9 @@ async function ownQuestion(userId: string, id: string) {
 }
 function metaFields(f: any) {
   const data: Record<string, string> = {};
-  for (const k of META) if (f && typeof f[k] === "string") data[k] = text(f[k], k === "sheikh" || k === "topic" || k === "place" ? 300 : k === "date" ? 10 : 40000);
+  for (const k of META) if (f && typeof f[k] === "string") data[k] = text(f[k], k === "sheikh" || k === "topic" || k === "place" ? 300 : k === "date" ? 10 : k === "time" ? 5 : 40000);
   if (data.date && !/^\d{4}-\d{2}-\d{2}$/.test(data.date)) data.date = "";
+  if (data.time && !/^\d{2}:\d{2}$/.test(data.time)) data.time = "";
   if ("sheikh" in data && !data.sheikh.trim()) delete data.sheikh;
   return data;
 }
@@ -51,6 +53,18 @@ export async function POST(req: Request) {
         const data = metaFields(b.fields);
         if (Object.keys(data).length) await prisma.majlis.update({ where: { id: b.id }, data });
         return { ok: true };
+      }
+      case "share": {
+        await ownMajlis(me.id, b.id);
+        if (!b.on) {
+          await prisma.majlis.update({ where: { id: b.id }, data: { shareToken: null } });
+          return { token: null };
+        }
+        const cur = await prisma.majlis.findUnique({ where: { id: b.id }, select: { shareToken: true } });
+        if (cur?.shareToken) return { token: cur.shareToken };
+        const token = randomBytes(18).toString("base64url");
+        await prisma.majlis.update({ where: { id: b.id }, data: { shareToken: token } });
+        return { token };
       }
       case "deleteMajlis": {
         await ownMajlis(me.id, b.id);

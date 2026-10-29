@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { fail, handle, requireUser } from "@/lib/auth";
 import { dailyLimit } from "@/lib/limits";
@@ -44,6 +45,15 @@ export async function POST(req: Request) {
       if (!u) fail("ما لقيت المستخدم", 404);
       if (u!.role === "admin") fail("حساب المدير ما يحتاج موافقة");
       await prisma.user.update({ where: { id: u!.id }, data: { approved: !!b.approved } });
+      return { ok: true };
+    }
+    if (b.op === "setPassword") {
+      const u = await prisma.user.findUnique({ where: { id: String(b.id || "") } });
+      if (!u) fail("ما لقيت المستخدم", 404);
+      if (u!.role === "admin") fail("كلمة مرور المدير تتغير من متغيرات Vercel");
+      const pw = String(b.password ?? "");
+      if (pw.length < 8) fail("كلمة المرور لازم تكون ٨ أحرف أو أكثر");
+      await prisma.user.update({ where: { id: u!.id }, data: { passwordHash: await bcrypt.hash(pw, 10) } });
       return { ok: true };
     }
     if (b.op === "setLimit") {

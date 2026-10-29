@@ -153,6 +153,8 @@
       : '';
   }
   function boot() {
+    var sh = shareTokenFromHash();
+    if (sh) { renderShare(sh); return; }
     api('/api/data').then(function (j) {
       me = j.me; ai = j.ai || null; list = j.majalis || []; listLoaded = true; netState = 'live'; pendingN = j.pending || 0;
       route();
@@ -167,6 +169,7 @@
     if (!me) return;
     var h = (location.hash || '').slice(1);
     try { h = decodeURIComponent(h); } catch (e) {}
+    if (h.indexOf('share-') === 0) { renderShare(h.slice(6)); return; }
     if (h.indexOf('s-') === 0 && h.length > 2) { var parts = h.slice(2).split('~'); openSession(parts[0], parts[1]); }
     else if (h === 'admin' && me.role === 'admin') openAdmin();
     else if (h === 'sheikhs') openSheikhs();
@@ -174,7 +177,11 @@
     else if (h === 'library') openLibrary();
     else openHome();
   }
-  window.addEventListener('hashchange', route);
+  window.addEventListener('hashchange', function () {
+    if (!me && shareTokenFromHash()) { renderShare(shareTokenFromHash()); return; }
+    if (!me && view === 'share') { view = null; boot(); return; }
+    route();
+  });
   function leaveSession() { closeFocus(true); if (!cur) return; flushAll(); cur = null; }
 
   /* ================= LOGIN / FIRST-RUN SETUP ================= */
@@ -696,6 +703,7 @@
             ? '<div class="u-act"><button class="btn primary" type="button" data-approve>قبول</button>' +
               '<button class="icon-btn" type="button" data-del data-label="رفض">رفض</button></div>'
             : '<div class="u-act"><label class="asked"><input type="checkbox" data-ai ' + (u.aiAllowed ? 'checked' : '') + '><span>الذكاء الاصطناعي</span></label>' +
+              '<button class="icon-btn" type="button" data-pw>كلمة مرور جديدة</button>' +
               '<button class="icon-btn" type="button" data-suspend>إيقاف</button>' +
               '<button class="icon-btn" type="button" data-del data-label="حذف">حذف</button></div>') + '</div>';
       }).join('') || '<p class="empty">ما فيه مستخدمين</p>';
@@ -710,6 +718,24 @@
   });
   app.addEventListener('click', function (e) {
     if (view !== 'admin') return;
+    var pwb = e.target.closest('button[data-pw]');
+    if (pwb) {
+      var row = pwb.closest('.u-row');
+      if (row.querySelector('.pw-form')) return;
+      var f = document.createElement('form'); f.className = 'pw-form'; f.autocomplete = 'off';
+      var fid = 'pw-' + row.dataset.id;
+      f.innerHTML = '<label class="lbl" for="' + fid + '">كلمة المرور الجديدة</label><input class="input" id="' + fid + '" dir="ltr" autocomplete="off" placeholder="٨ أحرف أو أكثر">' +
+        '<button class="btn primary" type="submit">حفظ</button><button class="btn ghost" type="button" data-pwcancel>إلغاء</button>';
+      row.appendChild(f); f.querySelector('input').focus();
+      f.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var pw = f.querySelector('input').value;
+        if (pw.length < 8) { toast('كلمة المرور لازم تكون ٨ أحرف أو أكثر'); return; }
+        api('/api/admin', { op: 'setPassword', id: row.dataset.id, password: pw }).then(function () { f.remove(); toast('تغيّرت كلمة المرور. أرسلها له.'); }, function (er) { toast(er.message); });
+      });
+      f.querySelector('[data-pwcancel]').addEventListener('click', function () { f.remove(); });
+      return;
+    }
     var ap = e.target.closest('button[data-approve], button[data-suspend]');
     if (ap) {
       ap.disabled = true;
@@ -725,7 +751,7 @@
   function alertLine(msg) { var m = document.getElementById('limMsg'); if (m) m.textContent = msg; }
 
   /* ================= SESSION ================= */
-  var META_FIELDS = ['sheikh', 'topic', 'date', 'place', 'opening', 'briefing', 'books', 'general'];
+  var META_FIELDS = ['sheikh', 'topic', 'date', 'time', 'place', 'opening', 'briefing', 'books', 'general'];
 
   function openSession(sid, jump) {
     if (cur && cur.sid === sid) { if (jump) jumpTo(jump); return; }
@@ -740,8 +766,11 @@
       '<div class="meta-grid">' +
       '<div class="field"><label for="m-topic">الموضوع</label><input class="input" id="m-topic" data-f="topic" placeholder="موضوع الجلسة"></div>' +
       '<div class="field"><label for="m-date">التاريخ</label><input class="input" id="m-date" data-f="date" type="date"><span class="hijri" id="m-hijri"></span></div>' +
+      '<div class="field"><label for="m-time">الوقت</label><input class="input" id="m-time" data-f="time" type="time"></div>' +
       '<div class="field"><label for="m-place">المكان</label><input class="input" id="m-place" data-f="place" placeholder="المسجد أو المدينة"></div>' +
-      '</div></header>' +
+      '</div>' +
+      '<div class="btns s-actions"><a class="btn" id="icsBtn" href="#">أضف للتقويم</a><button class="btn" id="shareBtn" type="button" aria-expanded="false">مشاركة للقراءة</button></div>' +
+      '<div class="share-panel" id="sharePanel" hidden></div></header>' +
       '<nav class="bar" aria-label="أقسام الجلسة"><div class="wrap"><div class="links">' +
       '<button type="button" data-jump="sec-prep">التحضير</button>' +
       '<button type="button" data-jump="sec-q">الأسئلة</button>' +
@@ -799,6 +828,7 @@
   function applyServer(j, first) {
     var sid = cur.sid, data = j.majlis || {};
     cur.meta = cur.meta || {};
+    cur.share = data.shareToken || null;
     META_FIELDS.forEach(function (f) {
       var k = 'm/' + sid + '/' + f;
       var el = document.getElementById(f === 'opening' || f === 'briefing' ? 'ri-' + f : 'm-' + f);
@@ -864,7 +894,7 @@
 
   function paintMeta() {
     if (!cur || !cur.meta) return;
-    ['sheikh', 'topic', 'date', 'place', 'books', 'general'].forEach(function (f) {
+    ['sheikh', 'topic', 'date', 'time', 'place', 'books', 'general'].forEach(function (f) {
       var el = document.getElementById('m-' + f);
       var v = cur.meta[f] || '';
       if (el && document.activeElement !== el && el.value !== v) { el.value = v; if (el.tagName === 'TEXTAREA') grow(el); }
@@ -977,7 +1007,7 @@
       cur.meta[t.dataset.f] = t.value;
       if (t.tagName === 'TEXTAREA') grow(t);
       if (t.dataset.f === 'date') paintMeta();
-      writeMeta(t.dataset.f, t.dataset.f === 'date' ? 0 : 900);
+      writeMeta(t.dataset.f, t.dataset.f === 'date' || t.dataset.f === 'time' ? 0 : 900);
       return;
     }
     if (t.classList && t.classList.contains('answer')) {
@@ -1159,6 +1189,23 @@
     });
 
     document.getElementById('focusBtn').addEventListener('click', openFocus);
+    document.getElementById('icsBtn').addEventListener('click', function (e) {
+      e.preventDefault();
+      if (!cur || !cur.meta) return;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cur.meta.date || '')) { toast('حدّد تاريخ المجلس أول'); document.getElementById('m-date').focus(); return; }
+      var sid = cur.sid, keys = ['date', 'time', 'place', 'topic', 'sheikh'].map(function (f) { return 'm/' + sid + '/' + f; });
+      keys.forEach(function (k) { if (WQ[k] && WQ[k].timer) run(k); });
+      var tries = 0;
+      (function go() {
+        if (keys.some(pending) && tries++ < 30) { setTimeout(go, 150); return; }
+        location.href = '/api/ics?id=' + encodeURIComponent(sid);
+      })();
+    });
+    document.getElementById('shareBtn').addEventListener('click', function () {
+      var pn = document.getElementById('sharePanel'), btn = document.getElementById('shareBtn');
+      pn.hidden = !pn.hidden; btn.setAttribute('aria-expanded', pn.hidden ? 'false' : 'true');
+      if (!pn.hidden) paintShare();
+    });
     var timerBtn = document.getElementById('timerBtn'), panel = document.getElementById('timerPanel');
     timerBtn.addEventListener('click', function () {
       panel.hidden = !panel.hidden; timerBtn.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
@@ -1188,6 +1235,63 @@
         wake.want = true; wake.acquire().catch(function () { wake.want = false; wakeBtn.hidden = true; });
       });
     }
+  }
+
+  /* ================= SHARE (read-only link) ================= */
+  function shareTokenFromHash() { var m = (location.hash || '').match(/^#share-([A-Za-z0-9_-]{16,64})$/); return m ? m[1] : ''; }
+  function shareUrl(t) { return location.origin + location.pathname + '#share-' + t; }
+  function paintShare() {
+    var pn = document.getElementById('sharePanel'); if (!pn || !cur) return;
+    if (!cur.share) {
+      pn.innerHTML = '<p>أي أحد معه الرابط يقدر يقرأ الأسئلة والأجوبة والفوائد والكتب، بدون التحضير وتحليل الشخصية. وتقدر توقف الرابط متى ما بغيت.</p>' +
+        '<div class="btns"><button class="btn primary" type="button" id="shOn">أنشئ الرابط</button></div>';
+      document.getElementById('shOn').addEventListener('click', function (e) { setShare(true, e.target); });
+      return;
+    }
+    pn.innerHTML = '<label class="lbl" for="shLink">رابط القراءة</label><input class="input" id="shLink" readonly dir="ltr" value="' + esc(shareUrl(cur.share)) + '">' +
+      '<div class="btns"><button class="btn primary" type="button" id="shCopy">نسخ الرابط</button>' +
+      '<a class="btn" id="shWa" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent('مجلس ' + (cur.meta.sheikh || '') + '\n' + shareUrl(cur.share)) + '">إرسال واتساب</a>' +
+      '<button class="btn ghost" type="button" id="shOff">إيقاف المشاركة</button></div>';
+    document.getElementById('shCopy').addEventListener('click', function () {
+      var inp = document.getElementById('shLink');
+      function fb() { inp.focus(); inp.select(); toast('حدّد الرابط وانسخه'); }
+      try { navigator.clipboard.writeText(inp.value).then(function () { toast('انتسخ الرابط'); }, fb); } catch (e) { fb(); }
+    });
+    document.getElementById('shOff').addEventListener('click', function (e) { setShare(false, e.target); });
+  }
+  function setShare(on, btn) {
+    if (!cur) return;
+    var sid = cur.sid; btn.disabled = true;
+    act('share', { id: sid, on: on }).then(function (j) {
+      if (!cur || cur.sid !== sid) return;
+      cur.share = j.token || null; paintShare();
+      toast(on ? 'جهز الرابط' : 'توقفت المشاركة، والرابط القديم ما عاد يفتح');
+    }, function (e) { btn.disabled = false; toast(e.message); });
+  }
+  function renderShare(token) {
+    leaveSession(); view = 'share';
+    app.innerHTML = '<main class="wrap share-view"><p class="boot">جاري التحميل</p></main>';
+    fetch('/api/share?t=' + encodeURIComponent(token), { cache: 'no-store' }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new ApiErr(r.status, j.error || 'تعذّر الفتح'); return j; });
+    }).then(function (j) {
+      if (view !== 'share') return;
+      var m = j.majlis || {}, d = fmtDate(str(m.date));
+      document.title = 'مجلس ' + (m.sheikh || '');
+      var qs = (j.questions || []).filter(function (q) { return str(q.answer).trim() || q.asked; });
+      app.innerHTML = '<header class="s-top wrap"><div class="eyebrow">مجلس مع</div><h1>' + esc(m.sheikh || '') + '</h1>' +
+        '<p class="lede">' + [m.topic ? esc(m.topic) : '', d.g ? esc(d.g) + (d.h ? ' · ' + esc(d.h) : '') : '', m.place ? esc(m.place) : ''].filter(Boolean).join(' · ') + '</p></header>' +
+        '<main class="s-main wrap share-view">' +
+        (qs.length ? '<section class="sec"><h2>الأسئلة والأجوبة</h2><ol class="qlist">' + qs.map(function (q, i) {
+          return '<li class="q"><span class="q-num" aria-hidden="true">' + ar(i + 1) + '</span><div class="q-body"><p class="q-text">' + esc(q.text) + '</p>' +
+            (str(q.answer).trim() ? '<div class="rich">' + md(q.answer) + '</div>' : '') + '</div></li>';
+        }).join('') + '</ol></section>' : '') +
+        (str(m.general).trim() ? '<section class="sec"><h2>فوائد وأفكار للتطبيق</h2><div class="rich">' + md(m.general) + '</div></section>' : '') +
+        (str(m.books).trim() ? '<section class="sec"><h2>كتب وآثار ذكرها الشيخ</h2><div class="rich">' + md(m.books) + '</div></section>' : '') +
+        '<p class="hint">من دفتر مجالس المشايخ. هذي نسخة للقراءة فقط.</p></main>';
+    }, function (e) {
+      if (view !== 'share') return;
+      app.innerHTML = '<main class="wrap"><p class="boot">' + esc(e.message || 'ما قدرت أفتح الجلسة') + '</p></main>';
+    });
   }
 
   /* ================= SESSION TIMER ================= */

@@ -37,6 +37,8 @@ model Majlis {
   topic     String     @default("")
   /// YYYY-MM-DD
   date      String     @default("")
+  /// HH:MM (اختياري، لموعد التقويم)
+  time      String     @default("")
   place     String     @default("")
   /// التحضير والافتتاح (نص بتنسيق بسيط)
   opening   String     @default("")
@@ -44,6 +46,8 @@ model Majlis {
   briefing  String     @default("")
   books     String     @default("")
   general   String     @default("")
+  /// رابط مشاركة للقراءة فقط (null = غير مشارك)
+  shareToken String?   @unique
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   questions Question[]

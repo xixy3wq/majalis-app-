@@ -1,7 +1,7 @@
 import Script from "next/script";
 // الواجهة كاملة في public/app.js، والبيانات من مسارات /api
 export const dynamic = "force-dynamic";
-const V = "4";
+const V = "5";
 export default function Home() {
   return (
     <>
